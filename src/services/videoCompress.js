@@ -1,0 +1,154 @@
+/**
+ * Video Compression Service
+ * Downloads and compresses video for faster Remotion rendering
+ */
+
+const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const https = require('https');
+const http = require('http');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+
+const s3Client = new S3Client({ region: process.env.REMOTION_AWS_REGION || 'us-east-1' });
+
+/**
+ * Download file from URL
+ */
+function downloadFile(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath);
+    const client = url.startsWith('https') ? https : http;
+
+    client.get(url, (response) => {
+      if (response.statusCode === 302 || response.statusCode === 301) {
+        // Follow redirect
+        downloadFile(response.headers.location, destPath)
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
+
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        resolve();
+      });
+    }).on('error', (err) => {
+      fs.unlink(destPath, () => {});
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Compress video using ffmpeg
+ * @param {string} inputPath - Path to input video
+ * @param {string} outputPath - Path to output video
+ * @param {Object} options - Compression options
+ */
+function compressVideo(inputPath, outputPath, options = {}) {
+  const {
+    width = 480,        // Reduce to 480p
+    crf = 28,           // Quality (higher = smaller, 23-28 is good)
+    fps = 15,           // Reduce framerate
+  } = options;
+
+  // ffmpeg command: resize, reduce fps, compress
+  const cmd = `ffmpeg -y -i "${inputPath}" -vf "scale=${width}:-2,fps=${fps}" -c:v libx264 -crf ${crf} -preset fast -an "${outputPath}"`;
+
+  console.log('[VideoCompress] Running ffmpeg...');
+  execSync(cmd, { stdio: 'pipe' });
+  console.log('[VideoCompress] Compression complete');
+}
+
+/**
+ * Upload file to S3
+ */
+async function uploadToS3(filePath, key) {
+  const bucketName = 'remotionlambda-useast1-1fylxi4xgh'; // Same bucket as Remotion
+
+  const fileContent = fs.readFileSync(filePath);
+
+  await s3Client.send(new PutObjectCommand({
+    Bucket: bucketName,
+    Key: key,
+    Body: fileContent,
+    ContentType: 'video/mp4',
+  }));
+
+  return `https://${bucketName}.s3.us-east-1.amazonaws.com/${key}`;
+}
+
+/**
+ * Download, compress, and upload video
+ * @param {string} videoUrl - URL of the video to compress
+ * @returns {Promise<string>} - URL of compressed video on S3
+ */
+async function compressAndUpload(videoUrl) {
+  const tmpDir = '/tmp';
+  const timestamp = Date.now();
+  const inputPath = path.join(tmpDir, `input-${timestamp}.mp4`);
+  const outputPath = path.join(tmpDir, `compressed-${timestamp}.mp4`);
+
+  try {
+    console.log('[VideoCompress] Downloading video...');
+    await downloadFile(videoUrl, inputPath);
+
+    const inputSize = fs.statSync(inputPath).size;
+    console.log(`[VideoCompress] Input size: ${(inputSize / 1024 / 1024).toFixed(2)} MB`);
+
+    compressVideo(inputPath, outputPath);
+
+    const outputSize = fs.statSync(outputPath).size;
+    console.log(`[VideoCompress] Output size: ${(outputSize / 1024 / 1024).toFixed(2)} MB`);
+    console.log(`[VideoCompress] Reduction: ${((1 - outputSize/inputSize) * 100).toFixed(0)}%`);
+
+    console.log('[VideoCompress] Uploading to S3...');
+    const s3Key = `compressed-videos/${timestamp}.mp4`;
+    const s3Url = await uploadToS3(outputPath, s3Key);
+    console.log(`[VideoCompress] Uploaded: ${s3Url}`);
+
+    // Cleanup temp files
+    fs.unlinkSync(inputPath);
+    fs.unlinkSync(outputPath);
+
+    return s3Url;
+  } catch (error) {
+    // Cleanup on error
+    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    throw error;
+  }
+}
+
+/**
+ * Upload base64 image to S3
+ * @param {string} base64Data - Base64 encoded image (with or without data URI prefix)
+ * @returns {Promise<string>} - S3 URL of uploaded image
+ */
+async function uploadBase64ImageToS3(base64Data) {
+  const bucketName = 'remotionlambda-useast1-1fylxi4xgh';
+  const timestamp = Date.now();
+  const key = `original-photos/${timestamp}.jpg`;
+
+  // Remove data URI prefix if present
+  const base64Clean = base64Data.replace(/^data:image\/\w+;base64,/, '');
+  const buffer = Buffer.from(base64Clean, 'base64');
+
+  console.log(`[S3Upload] Uploading original photo (${(buffer.length / 1024).toFixed(1)} KB)...`);
+
+  await s3Client.send(new PutObjectCommand({
+    Bucket: bucketName,
+    Key: key,
+    Body: buffer,
+    ContentType: 'image/jpeg',
+  }));
+
+  const s3Url = `https://${bucketName}.s3.us-east-1.amazonaws.com/${key}`;
+  console.log(`[S3Upload] Uploaded: ${s3Url}`);
+
+  return s3Url;
+}
+
+module.exports = { compressAndUpload, uploadBase64ImageToS3 };

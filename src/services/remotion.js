@@ -57,7 +57,7 @@ async function renderGif({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
     imageFormat: 'png',
     // Speed optimizations
     framesPerLambda: 8,   // More parallel Lambdas for faster rendering
-    timeoutInMilliseconds: 120000,  // 2 min timeout for video loading
+    timeoutInMilliseconds: 240000,  // 4 min timeout for video loading
     delayRenderTimeoutInMilliseconds: 60000, // 60s for delayRender calls
     // Optional: webhook for async notification
     // webhook: {

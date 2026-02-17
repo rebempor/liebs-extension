@@ -39,7 +39,7 @@ async function renderGif({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
     region,
     functionName,
     serveUrl,
-    composition: 'PixarDustDirect',
+    composition: 'Main',
     codec: 'gif',
     inputProps: {
       firstName,

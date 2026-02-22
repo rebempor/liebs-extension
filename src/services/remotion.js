@@ -13,6 +13,28 @@
 
 const { renderMediaOnLambda, getRenderProgress } = require('@remotion/lambda/client');
 
+function normalizeOptionalHttpUrl(value) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`unsupported protocol "${parsed.protocol}"`);
+    }
+    return trimmed;
+  } catch (err) {
+    console.warn(`[Remotion] Ignoring invalid EFFECTS_OVERLAY_URL: ${err.message}`);
+    return null;
+  }
+}
+
 /**
  * Render MP4 using Remotion Lambda
  *
@@ -38,6 +60,24 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
     throw new Error('Remotion Lambda not configured. Set REMOTION_FUNCTION_NAME and REMOTION_SERVE_URL');
   }
 
+  const effectsOverlayUrl = normalizeOptionalHttpUrl(process.env.EFFECTS_OVERLAY_URL);
+  if (effectsOverlayUrl) {
+    console.log(`[Remotion] Using pre-rendered effects overlay: ${effectsOverlayUrl}`);
+  } else {
+    console.log('[Remotion] EFFECTS_OVERLAY_URL not set. Rendering inline fallback effects.');
+  }
+
+  const inputProps = {
+    firstName,
+    greeting,
+    ctaText,
+    originalPhotoUrl,
+    silhouetteUrl,
+    pixarImageUrl,
+    videoUrl,
+    ...(effectsOverlayUrl ? { effectsOverlayUrl } : {}),
+  };
+
   // Start the render — MP4 (H.264) is much faster than GIF encoding on Lambda
   const { renderId, bucketName } = await renderMediaOnLambda({
     region,
@@ -45,16 +85,7 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
     serveUrl,
     composition: 'Main',
     codec: 'h264',
-    inputProps: {
-      firstName,
-      greeting,
-      ctaText,
-      originalPhotoUrl: originalPhotoUrl,
-      silhouetteUrl: silhouetteUrl,
-      pixarImageUrl: pixarImageUrl,
-      videoUrl: videoUrl,
-      effectsOverlayUrl: 'https://remotionlambda-useast1-1fylxi4xgh.s3.us-east-1.amazonaws.com/effects-overlay.webm',
-    },
+    inputProps,
     scale: 0.45,          // 1080 -> 486px (final GIF is small anyway)
     everyNthFrame: 3,     // 30fps -> 10fps (fewer frames to render)
     imageFormat: 'jpeg',  // JPEG is faster than PNG for H.264 pipeline

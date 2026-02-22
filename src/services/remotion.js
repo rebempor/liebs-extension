@@ -52,7 +52,8 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
       originalPhotoUrl: originalPhotoUrl,
       silhouetteUrl: silhouetteUrl,
       pixarImageUrl: pixarImageUrl,
-      videoUrl: videoUrl
+      videoUrl: videoUrl,
+      effectsOverlayUrl: 'https://remotionlambda-useast1-1fylxi4xgh.s3.us-east-1.amazonaws.com/effects-overlay.webm',
     },
     scale: 0.45,          // 1080 -> 486px (final GIF is small anyway)
     everyNthFrame: 3,     // 30fps -> 10fps (fewer frames to render)

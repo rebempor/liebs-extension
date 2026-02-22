@@ -35,6 +35,36 @@ function normalizeOptionalHttpUrl(value) {
   }
 }
 
+function readNumberEnv(name, fallback, { integer = false, min, max } = {}) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    console.warn(`[Remotion] Invalid ${name}="${raw}". Using fallback ${fallback}.`);
+    return fallback;
+  }
+
+  if (integer && !Number.isInteger(parsed)) {
+    console.warn(`[Remotion] ${name} must be an integer. Using fallback ${fallback}.`);
+    return fallback;
+  }
+
+  if (min !== undefined && parsed < min) {
+    console.warn(`[Remotion] ${name} must be >= ${min}. Using fallback ${fallback}.`);
+    return fallback;
+  }
+
+  if (max !== undefined && parsed > max) {
+    console.warn(`[Remotion] ${name} must be <= ${max}. Using fallback ${fallback}.`);
+    return fallback;
+  }
+
+  return parsed;
+}
+
 /**
  * Render MP4 using Remotion Lambda
  *
@@ -78,6 +108,19 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
     ...(effectsOverlayUrl ? { effectsOverlayUrl } : {}),
   };
 
+  // Tunable render settings to speed up Lambda renders.
+  // Defaults are optimized for current 486px / 10fps output profile.
+  const scale = readNumberEnv('REMOTION_SCALE', 0.45, { min: 0.1, max: 1 });
+  const everyNthFrame = readNumberEnv('REMOTION_EVERY_NTH_FRAME', 3, { integer: true, min: 1, max: 10 });
+  const framesPerLambda = readNumberEnv('REMOTION_FRAMES_PER_LAMBDA', 8, { integer: true, min: 4, max: 200 });
+  const concurrency = readNumberEnv('REMOTION_CONCURRENCY', 6, { integer: true, min: 1, max: 1000 });
+  const concurrencyPerLambda = readNumberEnv('REMOTION_CONCURRENCY_PER_LAMBDA', 1, { integer: true, min: 1, max: 4 });
+
+  console.log(
+    `[Remotion] Render tuning: scale=${scale}, everyNthFrame=${everyNthFrame}, ` +
+      `framesPerLambda=${framesPerLambda}, concurrency=${concurrency}, concurrencyPerLambda=${concurrencyPerLambda}`
+  );
+
   // Start the render — MP4 (H.264) is much faster than GIF encoding on Lambda
   const { renderId, bucketName } = await renderMediaOnLambda({
     region,
@@ -86,10 +129,12 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
     composition: 'Main',
     codec: 'h264',
     inputProps,
-    scale: 0.45,          // 1080 -> 486px (final GIF is small anyway)
-    everyNthFrame: 3,     // 30fps -> 10fps (fewer frames to render)
+    scale,                // 1080 -> 486px at default 0.45
+    everyNthFrame,        // 30fps -> 10fps at default 3
     imageFormat: 'jpeg',  // JPEG is faster than PNG for H.264 pipeline
-    framesPerLambda: 25,  // 2 Lambda workers (50 frames / 25 = 2)
+    framesPerLambda,      // Default 8 -> ~7 Lambda chunks for a 50-frame render
+    concurrency,          // Default 6 workers in parallel
+    concurrencyPerLambda, // Parallelism inside each Lambda container
     timeoutInMilliseconds: 240000,  // 4 min timeout
     delayRenderTimeoutInMilliseconds: 60000, // 60s for delayRender calls
   });

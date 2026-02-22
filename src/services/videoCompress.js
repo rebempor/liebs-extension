@@ -100,7 +100,7 @@ async function compressAndUpload(videoUrl) {
     const inputSize = fs.statSync(inputPath).size;
     console.log(`[VideoCompress] Input size: ${(inputSize / 1024 / 1024).toFixed(2)} MB`);
 
-    compressVideo(inputPath, outputPath);
+    await compressVideo(inputPath, outputPath);
 
     const outputSize = fs.statSync(outputPath).size;
     console.log(`[VideoCompress] Output size: ${(outputSize / 1024 / 1024).toFixed(2)} MB`);

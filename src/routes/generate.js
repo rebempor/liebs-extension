@@ -2,8 +2,8 @@ const express = require('express');
 const { requireAuth, supabase } = require('../middleware/auth');
 const { generatePixarImage } = require('../services/fal');
 const { generateVideo } = require('../services/replicate');
-const { renderGif } = require('../services/remotion');
-const { compressAndUpload, uploadBase64ImageToS3 } = require('../services/videoCompress');
+const { renderMp4 } = require('../services/remotion');
+const { compressAndUpload, convertMp4ToGif, uploadBase64ImageToS3 } = require('../services/videoCompress');
 const { removeBackground } = require('../services/backgroundRemoval');
 
 const router = express.Router();
@@ -82,9 +82,9 @@ router.post('/pixar-gif', requireAuth, async (req, res) => {
     console.log('[Generate] Step 2.5: Compressing video...');
     const videoUrl = await compressAndUpload(rawVideoUrl);
 
-    // Step 3: Render GIF with Remotion Lambda
-    console.log('[Generate] Step 3: Rendering GIF with Remotion Lambda...');
-    const gifUrl = await renderGif({
+    // Step 3: Render MP4 with Remotion Lambda (faster than GIF encoding on Lambda)
+    console.log('[Generate] Step 3: Rendering MP4 with Remotion Lambda...');
+    const mp4Url = await renderMp4({
       originalPhotoUrl: originalPhotoS3Url,  // Original LinkedIn photo (from S3)
       silhouetteUrl: silhouetteUrl,          // Person cutout with transparent BG
       pixarImageUrl: pixarImageUrl,          // Transformed Pixar image
@@ -93,6 +93,10 @@ router.post('/pixar-gif', requireAuth, async (req, res) => {
       greeting: greeting || `Hey, ${firstName}!`,
       ctaText: ctaText || 'Open to talk?'
     });
+
+    // Step 3.5: Convert MP4 to GIF server-side with FFmpeg palettegen
+    console.log('[Generate] Step 3.5: Converting MP4 to GIF...');
+    const gifUrl = await convertMp4ToGif(mp4Url);
 
     // Deduct credit
     console.log('[Generate] Deducting 1 credit...');
@@ -126,6 +130,7 @@ router.post('/pixar-gif', requireAuth, async (req, res) => {
     res.json({
       success: true,
       gifUrl: gifUrl,
+      mp4Url: mp4Url,
       pixarImageUrl: pixarImageUrl,
       videoUrl: videoUrl,
       creditsRemaining: balance - 1,

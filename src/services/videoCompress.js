@@ -3,7 +3,9 @@
  * Downloads and compresses video for faster Remotion rendering
  */
 
-const { execSync } = require('child_process');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
@@ -47,7 +49,7 @@ function downloadFile(url, destPath) {
  * @param {string} outputPath - Path to output video
  * @param {Object} options - Compression options
  */
-function compressVideo(inputPath, outputPath, options = {}) {
+async function compressVideo(inputPath, outputPath, options = {}) {
   const {
     width = 480,        // Reduce to 480p
     crf = 28,           // Quality (higher = smaller, 23-28 is good)
@@ -58,14 +60,14 @@ function compressVideo(inputPath, outputPath, options = {}) {
   const cmd = `ffmpeg -y -i "${inputPath}" -vf "scale=${width}:-2,fps=${fps}" -c:v libx264 -crf ${crf} -preset fast -an "${outputPath}"`;
 
   console.log('[VideoCompress] Running ffmpeg...');
-  execSync(cmd, { stdio: 'pipe' });
+  await execAsync(cmd);
   console.log('[VideoCompress] Compression complete');
 }
 
 /**
  * Upload file to S3
  */
-async function uploadToS3(filePath, key) {
+async function uploadToS3(filePath, key, contentType = 'video/mp4') {
   const bucketName = 'remotionlambda-useast1-1fylxi4xgh'; // Same bucket as Remotion
 
   const fileContent = fs.readFileSync(filePath);
@@ -74,7 +76,7 @@ async function uploadToS3(filePath, key) {
     Bucket: bucketName,
     Key: key,
     Body: fileContent,
-    ContentType: 'video/mp4',
+    ContentType: contentType,
   }));
 
   return `https://${bucketName}.s3.us-east-1.amazonaws.com/${key}`;
@@ -151,4 +153,46 @@ async function uploadBase64ImageToS3(base64Data) {
   return s3Url;
 }
 
-module.exports = { compressAndUpload, uploadBase64ImageToS3 };
+/**
+ * Convert MP4 to GIF using FFmpeg two-pass palettegen
+ * @param {string} mp4Url - URL of the MP4 to convert
+ * @returns {Promise<string>} - S3 URL of the generated GIF
+ */
+async function convertMp4ToGif(mp4Url) {
+  const tmpDir = '/tmp';
+  const timestamp = Date.now();
+  const inputPath = path.join(tmpDir, `gif-input-${timestamp}.mp4`);
+  const outputPath = path.join(tmpDir, `output-${timestamp}.gif`);
+
+  try {
+    console.log('[MP4toGIF] Downloading MP4...');
+    await downloadFile(mp4Url, inputPath);
+
+    const inputSize = fs.statSync(inputPath).size;
+    console.log(`[MP4toGIF] Input size: ${(inputSize / 1024 / 1024).toFixed(2)} MB`);
+
+    // Two-pass palettegen for high-quality GIF with small file size
+    const cmd = `ffmpeg -y -i "${inputPath}" -vf "fps=10,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3" "${outputPath}"`;
+    console.log('[MP4toGIF] Converting with FFmpeg palettegen...');
+    await execAsync(cmd);
+
+    const outputSize = fs.statSync(outputPath).size;
+    console.log(`[MP4toGIF] GIF size: ${(outputSize / 1024 / 1024).toFixed(2)} MB`);
+
+    console.log('[MP4toGIF] Uploading GIF to S3...');
+    const s3Key = `generated-gifs/${timestamp}.gif`;
+    const s3Url = await uploadToS3(outputPath, s3Key, 'image/gif');
+    console.log(`[MP4toGIF] Uploaded: ${s3Url}`);
+
+    fs.unlinkSync(inputPath);
+    fs.unlinkSync(outputPath);
+
+    return s3Url;
+  } catch (error) {
+    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    throw error;
+  }
+}
+
+module.exports = { compressAndUpload, convertMp4ToGif, uploadBase64ImageToS3 };

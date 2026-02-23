@@ -9,6 +9,14 @@ const { trackError } = require('../services/errorTracker');
 
 const router = express.Router();
 
+function isMissingGenerationJobsTable(err) {
+  return Boolean(
+    err &&
+      err.code === 'PGRST205' &&
+      /generation_jobs/.test(err.message || '')
+  );
+}
+
 /**
  * POST /api/generate/pixar-gif
  * Queue a generation job and return immediately.
@@ -42,16 +50,23 @@ router.post('/pixar-gif', requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('[Generate] Queue error:', err.message);
+    const queueNotReady = isMissingGenerationJobsTable(err);
     await trackError({
       source: 'generate',
       route: '/api/generate/pixar-gif',
       method: 'POST',
-      statusCode: 500,
+      statusCode: queueNotReady ? 503 : 500,
       userId: req.user?.id || null,
       errorCode: err.code || null,
       message: err.message || 'Failed to queue generation job',
       stack: err.stack || null,
     });
+    if (queueNotReady) {
+      return res.status(503).json({
+        error: 'Generation queue is not ready yet',
+        code: 'JOB_QUEUE_NOT_READY',
+      });
+    }
     res.status(500).json({ error: 'Failed to queue generation job' });
   }
 });
@@ -94,17 +109,24 @@ router.get('/jobs/:id', requireAuth, async (req, res) => {
     res.json(payload);
   } catch (err) {
     console.error('[Generate] Job status error:', err.message);
+    const queueNotReady = isMissingGenerationJobsTable(err);
     await trackError({
       source: 'generate',
       route: '/api/generate/jobs/:id',
       method: 'GET',
-      statusCode: 500,
+      statusCode: queueNotReady ? 503 : 500,
       userId: req.user?.id || null,
       errorCode: err.code || null,
       message: err.message || 'Failed to get job status',
       stack: err.stack || null,
       context: { jobId: req.params.id },
     });
+    if (queueNotReady) {
+      return res.status(503).json({
+        error: 'Generation queue is not ready yet',
+        code: 'JOB_QUEUE_NOT_READY',
+      });
+    }
     res.status(500).json({ error: 'Failed to get job status' });
   }
 });

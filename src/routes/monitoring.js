@@ -4,6 +4,14 @@ const { trackError } = require('../services/errorTracker');
 
 const router = express.Router();
 
+function isMissingMonitoringTables(err) {
+  return Boolean(
+    err &&
+      err.code === 'PGRST205' &&
+      /(generation_jobs|error_events)/.test(err.message || '')
+  );
+}
+
 function toHours(value, fallback = 24) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -159,16 +167,23 @@ router.get('/summary', requireAuth, async (req, res) => {
     res.json(summary);
   } catch (err) {
     console.error('[Monitoring] User summary error:', err.message);
+    const schemaMissing = isMissingMonitoringTables(err);
     await trackError({
       source: 'monitoring',
       route: '/api/monitoring/summary',
       method: 'GET',
-      statusCode: 500,
+      statusCode: schemaMissing ? 503 : 500,
       userId: req.user?.id || null,
       errorCode: err.code || null,
       message: err.message,
       stack: err.stack || null,
     });
+    if (schemaMissing) {
+      return res.status(503).json({
+        error: 'Monitoring schema is not ready yet',
+        code: 'MONITORING_SCHEMA_MISSING',
+      });
+    }
     res.status(500).json({ error: 'Failed to load monitoring summary' });
   }
 });
@@ -188,15 +203,22 @@ router.get('/admin/summary', requireMonitoringKey, async (req, res) => {
     res.json(summary);
   } catch (err) {
     console.error('[Monitoring] Admin summary error:', err.message);
+    const schemaMissing = isMissingMonitoringTables(err);
     await trackError({
       source: 'monitoring',
       route: '/api/monitoring/admin/summary',
       method: 'GET',
-      statusCode: 500,
+      statusCode: schemaMissing ? 503 : 500,
       errorCode: err.code || null,
       message: err.message,
       stack: err.stack || null,
     });
+    if (schemaMissing) {
+      return res.status(503).json({
+        error: 'Monitoring schema is not ready yet',
+        code: 'MONITORING_SCHEMA_MISSING',
+      });
+    }
     res.status(500).json({ error: 'Failed to load admin monitoring summary' });
   }
 });

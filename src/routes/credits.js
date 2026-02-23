@@ -1,6 +1,7 @@
 const express = require('express');
 const Stripe = require('stripe');
 const { requireAuth, supabase } = require('../middleware/auth');
+const { trackError } = require('../services/errorTracker');
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -31,6 +32,16 @@ router.get('/balance', requireAuth, async (req, res) => {
     res.json({ balance: data?.balance || 0 });
   } catch (err) {
     console.error('[Credits] Balance error:', err.message);
+    await trackError({
+      source: 'credits',
+      route: '/api/credits/balance',
+      method: 'GET',
+      statusCode: 500,
+      userId: req.user?.id || null,
+      errorCode: err.code || null,
+      message: err.message || 'Failed to get balance',
+      stack: err.stack || null,
+    });
     res.status(500).json({ error: 'Failed to get balance' });
   }
 });
@@ -87,6 +98,16 @@ router.post('/purchase', requireAuth, async (req, res) => {
     res.json({ checkoutUrl: session.url, sessionId: session.id });
   } catch (err) {
     console.error('[Credits] Purchase error:', err.message);
+    await trackError({
+      source: 'credits',
+      route: '/api/credits/purchase',
+      method: 'POST',
+      statusCode: 500,
+      userId: req.user?.id || null,
+      errorCode: err.code || null,
+      message: err.message || 'Failed to create checkout session',
+      stack: err.stack || null,
+    });
     res.status(500).json({ error: 'Failed to create checkout session' });
   }
 });
@@ -107,6 +128,15 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     );
   } catch (err) {
     console.error('[Webhook] Signature verification failed:', err.message);
+    await trackError({
+      source: 'credits',
+      route: '/api/credits/webhook',
+      method: 'POST',
+      statusCode: 400,
+      errorCode: err.code || null,
+      message: err.message || 'Webhook signature verification failed',
+      stack: err.stack || null,
+    });
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -148,6 +178,21 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       console.log(`[Webhook] Added ${creditsToAdd} credits to user ${user_id}`);
     } catch (err) {
       console.error('[Webhook] Failed to add credits:', err.message);
+      await trackError({
+        source: 'credits',
+        route: '/api/credits/webhook',
+        method: 'POST',
+        statusCode: 500,
+        userId: user_id || null,
+        errorCode: err.code || null,
+        message: err.message || 'Failed to add credits from webhook',
+        stack: err.stack || null,
+        context: {
+          stripeSessionId: session.id,
+          packId: pack_id,
+          creditsToAdd,
+        },
+      });
     }
   }
 
@@ -172,6 +217,16 @@ router.get('/history', requireAuth, async (req, res) => {
     res.json({ transactions: data || [] });
   } catch (err) {
     console.error('[Credits] History error:', err.message);
+    await trackError({
+      source: 'credits',
+      route: '/api/credits/history',
+      method: 'GET',
+      statusCode: 500,
+      userId: req.user?.id || null,
+      errorCode: err.code || null,
+      message: err.message || 'Failed to get transaction history',
+      stack: err.stack || null,
+    });
     res.status(500).json({ error: 'Failed to get history' });
   }
 });

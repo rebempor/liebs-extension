@@ -1,6 +1,7 @@
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const { requireAuth } = require('../middleware/auth');
+const { trackError } = require('../services/errorTracker');
 
 const router = express.Router();
 
@@ -63,6 +64,15 @@ router.post('/signup', async (req, res) => {
     });
   } catch (err) {
     console.error('[Auth] Signup error:', err);
+    await trackError({
+      source: 'auth',
+      route: '/api/auth/signup',
+      method: 'POST',
+      statusCode: 500,
+      errorCode: err.code || null,
+      message: err.message || 'Failed to create account',
+      stack: err.stack || null,
+    });
     res.status(500).json({ error: err.message || 'Failed to create account' });
   }
 });
@@ -107,6 +117,15 @@ router.post('/login', async (req, res) => {
     });
   } catch (err) {
     console.error('[Auth] Login error:', err.message);
+    await trackError({
+      source: 'auth',
+      route: '/api/auth/login',
+      method: 'POST',
+      statusCode: 500,
+      errorCode: err.code || null,
+      message: err.message || 'Failed to login',
+      stack: err.stack || null,
+    });
     res.status(500).json({ error: 'Failed to login' });
   }
 });
@@ -138,6 +157,16 @@ router.get('/me', requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('[Auth] Get me error:', err.message);
+    await trackError({
+      source: 'auth',
+      route: '/api/auth/me',
+      method: 'GET',
+      statusCode: 500,
+      userId: req.user?.id || null,
+      errorCode: err.code || null,
+      message: err.message || 'Failed to get user info',
+      stack: err.stack || null,
+    });
     res.status(500).json({ error: 'Failed to get user info' });
   }
 });

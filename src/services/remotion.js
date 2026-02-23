@@ -95,6 +95,39 @@ function readOptionalNumberEnv(name, { integer = false, min, max } = {}) {
   return parsed;
 }
 
+function readBooleanEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return fallback;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+
+  console.warn(`[Remotion] Invalid ${name}="${raw}". Using fallback ${fallback}.`);
+  return fallback;
+}
+
+function estimateEffectiveFrameCount(frameRange, everyNthFrame) {
+  if (!Array.isArray(frameRange) || frameRange.length !== 2) {
+    return null;
+  }
+
+  const start = Number(frameRange[0]);
+  const end = Number(frameRange[1]);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return null;
+  }
+
+  const totalFrames = end - start + 1;
+  return Math.floor((totalFrames - 1) / everyNthFrame) + 1;
+}
+
 /**
  * Render MP4 using Remotion Lambda
  *
@@ -148,6 +181,14 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
   const framesPerLambdaEnv = readOptionalNumberEnv('REMOTION_FRAMES_PER_LAMBDA', { integer: true, min: 4, max: 200 });
   const concurrencyEnv = readOptionalNumberEnv('REMOTION_CONCURRENCY', { integer: true, min: 1, max: 1000 });
   const concurrencyPerLambda = readNumberEnv('REMOTION_CONCURRENCY_PER_LAMBDA', 1, { integer: true, min: 1, max: 4 });
+  const dynamicConcurrencyEnabled = readBooleanEnv('REMOTION_DYNAMIC_CONCURRENCY', true);
+  const concurrencyLongFallback = readNumberEnv('REMOTION_CONCURRENCY_LONG', 20, { integer: true, min: 1, max: 1000 });
+  const shortMaxEffectiveFrames = readNumberEnv('REMOTION_CONCURRENCY_SHORT_MAX_EFFECTIVE_FRAMES', 20, {
+    integer: true,
+    min: 1,
+    max: 300,
+  });
+  const shortConcurrencyEnv = readOptionalNumberEnv('REMOTION_CONCURRENCY_SHORT', { integer: true, min: 1, max: 1000 });
 
   let chunkingMode;
   const chunkingOptions = {};
@@ -159,17 +200,29 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
     );
     chunkingMode = `concurrency:${concurrencyEnv}`;
     chunkingOptions.concurrency = concurrencyEnv;
-  } else if (concurrencyEnv !== null) {
-    chunkingMode = `concurrency:${concurrencyEnv}`;
-    chunkingOptions.concurrency = concurrencyEnv;
   } else if (framesPerLambdaEnv !== null) {
     chunkingMode = `framesPerLambda:${framesPerLambdaEnv}`;
     chunkingOptions.framesPerLambda = framesPerLambdaEnv;
   } else {
-    // Default to concurrency-driven fan-out for faster short renders.
-    const defaultConcurrency = 24;
-    chunkingMode = `concurrency:${defaultConcurrency} (default)`;
-    chunkingOptions.concurrency = defaultConcurrency;
+    const longConcurrency = concurrencyEnv ?? concurrencyLongFallback;
+
+    if (!dynamicConcurrencyEnabled) {
+      chunkingMode = `concurrency:${longConcurrency}${concurrencyEnv === null ? ' (default)' : ''}`;
+      chunkingOptions.concurrency = longConcurrency;
+    } else {
+      const effectiveFrames = estimateEffectiveFrameCount(frameRange, everyNthFrame);
+      const autoShortConcurrency = Math.max(4, Math.min(longConcurrency, Math.round(longConcurrency / 3)));
+      const shortConcurrency = shortConcurrencyEnv ?? autoShortConcurrency;
+
+      if (effectiveFrames !== null && effectiveFrames <= shortMaxEffectiveFrames) {
+        chunkingMode = `concurrency:${shortConcurrency} (dynamic-short effectiveFrames=${effectiveFrames})`;
+        chunkingOptions.concurrency = shortConcurrency;
+      } else {
+        const frameHint = effectiveFrames === null ? 'unknown' : String(effectiveFrames);
+        chunkingMode = `concurrency:${longConcurrency} (dynamic-long effectiveFrames=${frameHint})`;
+        chunkingOptions.concurrency = longConcurrency;
+      }
+    }
   }
 
   console.log(

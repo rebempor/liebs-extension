@@ -65,6 +65,36 @@ function readNumberEnv(name, fallback, { integer = false, min, max } = {}) {
   return parsed;
 }
 
+function readOptionalNumberEnv(name, { integer = false, min, max } = {}) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return null;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    console.warn(`[Remotion] Invalid ${name}="${raw}". Ignoring.`);
+    return null;
+  }
+
+  if (integer && !Number.isInteger(parsed)) {
+    console.warn(`[Remotion] ${name} must be an integer. Ignoring.`);
+    return null;
+  }
+
+  if (min !== undefined && parsed < min) {
+    console.warn(`[Remotion] ${name} must be >= ${min}. Ignoring.`);
+    return null;
+  }
+
+  if (max !== undefined && parsed > max) {
+    console.warn(`[Remotion] ${name} must be <= ${max}. Ignoring.`);
+    return null;
+  }
+
+  return parsed;
+}
+
 /**
  * Render MP4 using Remotion Lambda
  *
@@ -110,15 +140,39 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
 
   // Tunable render settings to speed up Lambda renders.
   // Defaults are optimized for current 486px / 10fps output profile.
+  // Note: Remotion Lambda v4 allows either `concurrency` OR `framesPerLambda`, not both.
   const scale = readNumberEnv('REMOTION_SCALE', 0.45, { min: 0.1, max: 1 });
   const everyNthFrame = readNumberEnv('REMOTION_EVERY_NTH_FRAME', 3, { integer: true, min: 1, max: 10 });
-  const framesPerLambda = readNumberEnv('REMOTION_FRAMES_PER_LAMBDA', 8, { integer: true, min: 4, max: 200 });
-  const concurrency = readNumberEnv('REMOTION_CONCURRENCY', 6, { integer: true, min: 1, max: 1000 });
+  const framesPerLambdaEnv = readOptionalNumberEnv('REMOTION_FRAMES_PER_LAMBDA', { integer: true, min: 4, max: 200 });
+  const concurrencyEnv = readOptionalNumberEnv('REMOTION_CONCURRENCY', { integer: true, min: 1, max: 1000 });
   const concurrencyPerLambda = readNumberEnv('REMOTION_CONCURRENCY_PER_LAMBDA', 1, { integer: true, min: 1, max: 4 });
+
+  let chunkingMode;
+  const chunkingOptions = {};
+
+  if (concurrencyEnv !== null && framesPerLambdaEnv !== null) {
+    console.warn(
+      '[Remotion] Both REMOTION_CONCURRENCY and REMOTION_FRAMES_PER_LAMBDA were set. ' +
+      'Using REMOTION_CONCURRENCY and ignoring REMOTION_FRAMES_PER_LAMBDA.'
+    );
+    chunkingMode = `concurrency:${concurrencyEnv}`;
+    chunkingOptions.concurrency = concurrencyEnv;
+  } else if (concurrencyEnv !== null) {
+    chunkingMode = `concurrency:${concurrencyEnv}`;
+    chunkingOptions.concurrency = concurrencyEnv;
+  } else if (framesPerLambdaEnv !== null) {
+    chunkingMode = `framesPerLambda:${framesPerLambdaEnv}`;
+    chunkingOptions.framesPerLambda = framesPerLambdaEnv;
+  } else {
+    // Default to concurrency-driven fan-out for faster short renders.
+    const defaultConcurrency = 6;
+    chunkingMode = `concurrency:${defaultConcurrency} (default)`;
+    chunkingOptions.concurrency = defaultConcurrency;
+  }
 
   console.log(
     `[Remotion] Render tuning: scale=${scale}, everyNthFrame=${everyNthFrame}, ` +
-      `framesPerLambda=${framesPerLambda}, concurrency=${concurrency}, concurrencyPerLambda=${concurrencyPerLambda}`
+      `chunking=${chunkingMode}, concurrencyPerLambda=${concurrencyPerLambda}`
   );
 
   // Start the render — MP4 (H.264) is much faster than GIF encoding on Lambda
@@ -132,9 +186,8 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
     scale,                // 1080 -> 486px at default 0.45
     everyNthFrame,        // 30fps -> 10fps at default 3
     imageFormat: 'jpeg',  // JPEG is faster than PNG for H.264 pipeline
-    framesPerLambda,      // Default 8 -> ~7 Lambda chunks for a 50-frame render
-    concurrency,          // Default 6 workers in parallel
     concurrencyPerLambda, // Parallelism inside each Lambda container
+    ...chunkingOptions,   // Set either `concurrency` or `framesPerLambda`
     timeoutInMilliseconds: 240000,  // 4 min timeout
     delayRenderTimeoutInMilliseconds: 60000, // 60s for delayRender calls
   });

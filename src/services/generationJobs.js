@@ -17,11 +17,31 @@ function readPositiveNumber(value, fallback) {
   return parsed;
 }
 
+function readPositiveInteger(value, fallback, { max } = {}) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  if (Number.isFinite(max) && parsed > max) {
+    console.warn(`[Jobs] Capping worker concurrency to ${max} (received ${parsed}).`);
+    return max;
+  }
+
+  return parsed;
+}
+
 const JOB_POLL_INTERVAL_MS = readPositiveNumber(process.env.GENERATION_JOB_POLL_MS, 3000);
 const STALE_JOB_MINUTES = readPositiveNumber(process.env.GENERATION_JOB_STALE_MINUTES, 30);
+const WORKER_CONCURRENCY = readPositiveInteger(
+  process.env.GENERATION_JOB_WORKER_CONCURRENCY,
+  4,
+  { max: 50 }
+);
 
 let workerStarted = false;
 let processingTick = false;
+let activeJobs = 0;
 let missingQueueTableLogged = false;
 
 function nowIso() {
@@ -229,19 +249,28 @@ async function processNextJob() {
 
   processingTick = true;
   try {
-    const job = await claimNextQueuedJob();
-    if (!job) {
-      return;
+    while (activeJobs < WORKER_CONCURRENCY) {
+      const job = await claimNextQueuedJob();
+      if (!job) {
+        return;
+      }
+
+      activeJobs += 1;
+      processClaimedJob(job)
+        .catch((err) => {
+          // processClaimedJob handles expected failures by marking the job failed.
+          // This catch handles unexpected rejections.
+          console.error(`[Jobs] Unexpected processing failure for ${job.id}:`, err.message);
+        })
+        .finally(() => {
+          activeJobs = Math.max(0, activeJobs - 1);
+          process.nextTick(() => {
+            processNextJob().catch((err) => {
+              console.error('[Jobs] Failed to continue queue drain:', err.message);
+            });
+          });
+        });
     }
-
-    await processClaimedJob(job);
-
-    // Drain queue quickly after finishing one job.
-    process.nextTick(() => {
-      processNextJob().catch((err) => {
-        console.error('[Jobs] Failed to continue queue drain:', err.message);
-      });
-    });
   } finally {
     processingTick = false;
   }
@@ -286,7 +315,9 @@ function startGenerationJobWorker() {
   }
 
   workerStarted = true;
-  console.log(`[Jobs] Worker started (poll interval: ${JOB_POLL_INTERVAL_MS}ms)`);
+  console.log(
+    `[Jobs] Worker started (poll interval: ${JOB_POLL_INTERVAL_MS}ms, concurrency: ${WORKER_CONCURRENCY})`
+  );
 
   requeueStaleProcessingJobs().catch((err) => {
     console.error('[Jobs] Initial stale-job requeue failed:', err.message);

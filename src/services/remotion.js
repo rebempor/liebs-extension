@@ -167,7 +167,7 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
     chunkingOptions.framesPerLambda = framesPerLambdaEnv;
   } else {
     // Default to concurrency-driven fan-out for faster short renders.
-    const defaultConcurrency = 6;
+    const defaultConcurrency = 24;
     chunkingMode = `concurrency:${defaultConcurrency} (default)`;
     chunkingOptions.concurrency = defaultConcurrency;
   }

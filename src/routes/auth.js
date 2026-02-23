@@ -29,7 +29,11 @@ router.post('/signup', async (req, res) => {
     });
 
     if (error) {
-      return res.status(400).json({ error: error.message });
+      const rateLimited = /rate limit/i.test(error.message || '');
+      return res.status(rateLimited ? 429 : 400).json({
+        error: error.message,
+        code: rateLimited ? 'AUTH_RATE_LIMITED' : undefined,
+      });
     }
 
     // Create initial credits record (0 credits - no free tier)

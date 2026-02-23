@@ -3,7 +3,7 @@ const { requireAuth, supabase } = require('../middleware/auth');
 const { generatePixarImage } = require('../services/fal');
 const { generateVideo } = require('../services/replicate');
 const { renderMp4 } = require('../services/remotion');
-const { compressAndUpload, convertMp4ToGif, uploadBase64ImageToS3, concatMp4s } = require('../services/videoCompress');
+const { convertMp4ToGif, uploadBase64ImageToS3, concatMp4s } = require('../services/videoCompress');
 const { removeBackground } = require('../services/backgroundRemoval');
 
 const router = express.Router();
@@ -103,13 +103,10 @@ router.post('/pixar-gif', requireAuth, async (req, res) => {
       });
     }
 
-    // Step 2: Generate video
+    // Step 2: Generate video (passed directly to Remotion — no compression needed
+    // since OffthreadVideo handles raw files efficiently via FFmpeg)
     console.log('[Generate] Step 2: Generating video...');
-    const rawVideoUrl = await generateVideo(pixarImageUrl);
-
-    // Step 2.5: Compress video for faster Remotion rendering
-    console.log('[Generate] Step 2.5: Compressing video...');
-    const videoUrl = await compressAndUpload(rawVideoUrl);
+    const videoUrl = await generateVideo(pixarImageUrl);
 
     // Await Phase 1 (should be done by now — it started ~100s ago)
     const phase1Mp4 = phase1Promise ? await phase1Promise : null;

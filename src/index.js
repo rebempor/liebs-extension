@@ -1,6 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const { assertSupabaseEnv } = require('./config/env');
+
+assertSupabaseEnv();
 
 const authRoutes = require('./routes/auth');
 const creditsRoutes = require('./routes/credits');

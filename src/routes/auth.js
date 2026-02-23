@@ -2,13 +2,14 @@ const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const { requireAuth } = require('../middleware/auth');
 const { trackError } = require('../services/errorTracker');
+const { env } = require('../config/env');
 
 const router = express.Router();
 
 // Create Supabase client with anon key for auth operations
 const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
+  env.supabaseUrl,
+  env.supabaseAnonKey
 );
 
 /**
@@ -41,8 +42,8 @@ router.post('/signup', async (req, res) => {
       console.log('[Auth] User created:', data.user.id);
 
       const serviceSupabase = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_KEY
+        env.supabaseUrl,
+        env.supabaseServiceKey
       );
 
       const { error: creditsError } = await serviceSupabase.from('credits').insert({
@@ -104,8 +105,8 @@ router.post('/login', async (req, res) => {
 
     // Get user's credit balance
     const serviceSupabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_KEY
+      env.supabaseUrl,
+      env.supabaseServiceKey
     );
 
     const { data: credits } = await serviceSupabase

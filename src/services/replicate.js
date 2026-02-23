@@ -23,7 +23,7 @@ async function generateVideo(imageUrl) {
     body: JSON.stringify({
       input: {
         image: imageUrl,
-        prompt: 'The character waves hello, simple wave gesture',
+        prompt: 'the character looks at the camera and waves hello in one simple wave gesture and smiles enthusiastically',
         duration: 3,
         resolution: '480p'
       }

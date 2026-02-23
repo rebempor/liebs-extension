@@ -195,4 +195,56 @@ async function convertMp4ToGif(mp4Url) {
   }
 }
 
-module.exports = { compressAndUpload, convertMp4ToGif, uploadBase64ImageToS3 };
+/**
+ * Concatenate two MP4s using FFmpeg stream copy (no re-encoding)
+ * @param {string} url1 - URL of the first MP4
+ * @param {string} url2 - URL of the second MP4
+ * @returns {Promise<string>} - S3 URL of the concatenated MP4
+ */
+async function concatMp4s(url1, url2) {
+  const tmpDir = '/tmp';
+  const timestamp = Date.now();
+  const part1Path = path.join(tmpDir, `concat-part1-${timestamp}.mp4`);
+  const part2Path = path.join(tmpDir, `concat-part2-${timestamp}.mp4`);
+  const listPath = path.join(tmpDir, `concat-list-${timestamp}.txt`);
+  const outputPath = path.join(tmpDir, `concat-output-${timestamp}.mp4`);
+
+  try {
+    console.log('[ConcatMP4] Downloading parts...');
+    await Promise.all([
+      downloadFile(url1, part1Path),
+      downloadFile(url2, part2Path),
+    ]);
+
+    // Create concat demuxer list
+    fs.writeFileSync(listPath, `file '${part1Path}'\nfile '${part2Path}'\n`);
+
+    // Stream copy — no re-encoding, nearly instant
+    const cmd = `ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${outputPath}"`;
+    console.log('[ConcatMP4] Concatenating with FFmpeg (stream copy)...');
+    await execAsync(cmd);
+
+    const outputSize = fs.statSync(outputPath).size;
+    console.log(`[ConcatMP4] Output size: ${(outputSize / 1024 / 1024).toFixed(2)} MB`);
+
+    console.log('[ConcatMP4] Uploading to S3...');
+    const s3Key = `rendered-mp4s/${timestamp}.mp4`;
+    const s3Url = await uploadToS3(outputPath, s3Key);
+    console.log(`[ConcatMP4] Uploaded: ${s3Url}`);
+
+    // Cleanup
+    fs.unlinkSync(part1Path);
+    fs.unlinkSync(part2Path);
+    fs.unlinkSync(listPath);
+    fs.unlinkSync(outputPath);
+
+    return s3Url;
+  } catch (error) {
+    for (const f of [part1Path, part2Path, listPath, outputPath]) {
+      if (fs.existsSync(f)) fs.unlinkSync(f);
+    }
+    throw error;
+  }
+}
+
+module.exports = { compressAndUpload, convertMp4ToGif, uploadBase64ImageToS3, concatMp4s };

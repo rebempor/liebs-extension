@@ -87,3 +87,21 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 CREATE INDEX idx_credits_user_id ON credits(user_id);
 CREATE INDEX idx_transactions_user_id ON transactions(user_id);
 CREATE INDEX idx_generations_user_id ON generations(user_id);
+
+-- Atomically deduct 1 credit if balance is sufficient.
+-- Returns the updated row if successful, empty result if insufficient balance.
+CREATE OR REPLACE FUNCTION deduct_credit(p_user_id UUID)
+RETURNS SETOF credits AS $$
+  UPDATE credits
+  SET balance = balance - 1, updated_at = NOW()
+  WHERE user_id = p_user_id AND balance >= 1
+  RETURNING *;
+$$ LANGUAGE sql SECURITY DEFINER;
+
+-- Refund 1 credit (used when generation fails after deduction).
+CREATE OR REPLACE FUNCTION refund_credit(p_user_id UUID)
+RETURNS VOID AS $$
+  UPDATE credits
+  SET balance = balance + 1, updated_at = NOW()
+  WHERE user_id = p_user_id;
+$$ LANGUAGE sql SECURITY DEFINER;

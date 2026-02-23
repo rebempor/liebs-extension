@@ -106,10 +106,12 @@ function readOptionalNumberEnv(name, { integer = false, min, max } = {}) {
  * @param {string} options.firstName - User's first name
  * @param {string} options.greeting - Greeting text
  * @param {string} options.ctaText - Call to action text
+ * @param {number[]} [options.frameRange] - Optional [start, end] frame range to render
  * @returns {Promise<string>} - URL to the rendered MP4
  */
-async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, videoUrl, firstName, greeting, ctaText }) {
-  console.log('[Remotion] Starting Lambda render (MP4)...');
+async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, videoUrl, firstName, greeting, ctaText, frameRange }) {
+  const rangeLabel = frameRange ? ` (frames ${frameRange[0]}-${frameRange[1]})` : '';
+  console.log(`[Remotion] Starting Lambda render (MP4)${rangeLabel}...`);
   console.log(`[Remotion] Props: firstName=${firstName}, greeting="${greeting}", cta="${ctaText}"`);
 
   const region = process.env.REMOTION_AWS_REGION || 'us-east-1';
@@ -176,7 +178,7 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
   );
 
   // Start the render — MP4 (H.264) is much faster than GIF encoding on Lambda
-  const { renderId, bucketName } = await renderMediaOnLambda({
+  const renderParams = {
     region,
     functionName,
     serveUrl,
@@ -190,7 +192,14 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
     ...chunkingOptions,   // Set either `concurrency` or `framesPerLambda`
     timeoutInMilliseconds: 240000,  // 4 min timeout
     delayRenderTimeoutInMilliseconds: 60000, // 60s for delayRender calls
-  });
+  };
+
+  if (frameRange) {
+    renderParams.frameRange = frameRange;
+    console.log(`[Remotion] Frame range: ${frameRange[0]}-${frameRange[1]}`);
+  }
+
+  const { renderId, bucketName } = await renderMediaOnLambda(renderParams);
 
   console.log(`[Remotion] Render started: ${renderId}`);
   console.log(`[Remotion] Bucket: ${bucketName}`);

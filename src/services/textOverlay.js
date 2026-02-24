@@ -10,10 +10,12 @@
  *   Greeting: frames 0–60  (0.000–2.000s), fade in 0–0.267s, fade out 1.600–2.000s
  *   CTA:      frames 100–150 (3.333–5.000s), fade in 3.333–3.833s
  *
+ * Font sizes are designed for the original 1080×1080 Remotion canvas and scaled
+ * dynamically based on the actual video dimensions (e.g. 486px at 0.45 scale).
+ *
  * Font configuration:
  *   Set DRAWTEXT_FONT_PATH env var to the path of a bold TTF/OTF font on the
  *   server. Falls back to common Ubuntu/Debian system font locations.
- *   Recommended: install the `fonts-noto` package and point to NotoSans-Bold.ttf
  */
 
 const { exec } = require('child_process');
@@ -83,6 +85,45 @@ async function uploadToS3(filePath, key, contentType = 'video/mp4') {
   return `https://${S3_BUCKET}.s3.us-east-1.amazonaws.com/${key}`;
 }
 
+// Original Remotion canvas size — font sizes are designed for this resolution
+const DESIGN_WIDTH = 1080;
+
+/**
+ * Probe the width of a local video file using ffprobe.
+ */
+async function probeVideoWidth(filePath) {
+  const { stdout } = await execAsync(
+    `ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "${filePath}"`
+  );
+  const width = parseInt(stdout.trim(), 10);
+  if (!width || isNaN(width)) {
+    console.warn('[TextOverlay] Could not probe video width, assuming 1080');
+    return DESIGN_WIDTH;
+  }
+  return width;
+}
+
+/**
+ * Scale a font size for the actual video width, with an overflow guard
+ * that shrinks text if it would be wider than maxWidthRatio of the video.
+ *
+ * @param {number} designFontSize  Font size at 1080px design resolution
+ * @param {number} scaleFactor     actualWidth / DESIGN_WIDTH
+ * @param {string} text            The text string to check for overflow
+ * @param {number} videoWidth      Actual video width in pixels
+ * @param {number} [maxWidthRatio] Max fraction of video width text may occupy
+ */
+function scaleFontSize(designFontSize, scaleFactor, text, videoWidth, maxWidthRatio = 0.85) {
+  let fontSize = Math.round(designFontSize * scaleFactor);
+  // Rough heuristic: average char width ≈ 0.6 × fontSize for bold sans-serif
+  const estimatedTextWidth = text.length * fontSize * 0.6;
+  const maxPx = videoWidth * maxWidthRatio;
+  if (estimatedTextWidth > maxPx && text.length > 0) {
+    fontSize = Math.floor(maxPx / (text.length * 0.6));
+  }
+  return Math.max(fontSize, 8); // floor at 8px
+}
+
 /**
  * Build the ffmpeg drawtext filter string for one text layer.
  *
@@ -92,7 +133,9 @@ async function uploadToS3(filePath, key, contentType = 'video/mp4') {
  * @param {Object} opts
  * @param {string} opts.textfilePath  Path to temp file containing the text
  * @param {string|null} opts.fontPath Path to the bold TTF font (or null)
- * @param {number} opts.fontSize      Font size in pixels
+ * @param {number} opts.fontSize      Font size in pixels (already scaled)
+ * @param {number} opts.borderw       Border width in pixels (already scaled)
+ * @param {number} opts.yOffset       Bottom padding in pixels (already scaled)
  * @param {number} opts.startTime     Start of visibility window (seconds)
  * @param {number} opts.endTime       End of visibility window (seconds)
  * @param {number} opts.fadeInStart   Start of fade-in (seconds)
@@ -105,6 +148,8 @@ function buildDrawtextFilter(opts) {
     textfilePath,
     fontPath,
     fontSize,
+    borderw,
+    yOffset,
     startTime,
     endTime,
     fadeInStart,
@@ -136,10 +181,10 @@ function buildDrawtextFilter(opts) {
     `textfile='${textfilePath}':` +
     `fontsize=${fontSize}:` +
     `fontcolor=white:` +
-    `borderw=6:` +
+    `borderw=${borderw}:` +
     `bordercolor=black:` +
     `x=(w-text_w)/2:` +
-    `y=h-text_h-80:` +
+    `y=h-text_h-${yOffset}:` +
     `alpha='${alphaExpr}':` +
     `enable='between(t,${startTime},${endTime})'`
   );
@@ -174,9 +219,25 @@ async function applyTextOverlay(mp4Url, { greeting, ctaText }) {
       console.log(`[TextOverlay] Using font: ${fontPath}`);
     }
 
+    // Probe actual video width to scale font sizes proportionally
+    const videoWidth = await probeVideoWidth(inputPath);
+    const scale = videoWidth / DESIGN_WIDTH;
+    console.log(`[TextOverlay] Video width: ${videoWidth}px (scale: ${scale.toFixed(2)} vs ${DESIGN_WIDTH}px design)`);
+
+    const greetingText = greeting || '';
+    const ctaTextStr = ctaText || '';
+
+    // Scale all pixel values from 1080px design to actual video size
+    const greetingFontSize = scaleFontSize(90, scale, greetingText, videoWidth);
+    const ctaFontSize = scaleFontSize(72, scale, ctaTextStr, videoWidth);
+    const borderW = Math.max(2, Math.round(6 * scale));
+    const yOffset = Math.max(10, Math.round(80 * scale));
+
+    console.log(`[TextOverlay] Scaled sizes: greeting=${greetingFontSize}px, cta=${ctaFontSize}px, border=${borderW}px, yOffset=${yOffset}px`);
+
     // Write text to temp files to avoid shell-escaping problems
-    fs.writeFileSync(greetingTextPath, greeting || '');
-    fs.writeFileSync(ctaTextPath, ctaText || '');
+    fs.writeFileSync(greetingTextPath, greetingText);
+    fs.writeFileSync(ctaTextPath, ctaTextStr);
 
     // Greeting: frames 0–60 at 30fps = 0.000–2.000s
     //   fade in:  frames 0–8   = 0.000–0.267s
@@ -184,7 +245,9 @@ async function applyTextOverlay(mp4Url, { greeting, ctaText }) {
     const greetingFilter = buildDrawtextFilter({
       textfilePath: greetingTextPath,
       fontPath,
-      fontSize: 90,
+      fontSize: greetingFontSize,
+      borderw: borderW,
+      yOffset,
       startTime: 0,
       endTime: 2.0,
       fadeInStart: 0,
@@ -199,7 +262,9 @@ async function applyTextOverlay(mp4Url, { greeting, ctaText }) {
     const ctaFilter = buildDrawtextFilter({
       textfilePath: ctaTextPath,
       fontPath,
-      fontSize: 72,
+      fontSize: ctaFontSize,
+      borderw: borderW,
+      yOffset,
       startTime: 3.333,
       endTime: 5.0,
       fadeInStart: 3.333,

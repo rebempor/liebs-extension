@@ -3,6 +3,40 @@ const { generateVideo } = require('./replicate');
 const { renderMp4 } = require('./remotion');
 const { convertMp4ToGif, uploadBase64ImageToS3, concatMp4s } = require('./videoCompress');
 const { removeBackground } = require('./backgroundRemoval');
+const { applyTextOverlay } = require('./textOverlay');
+
+const GENERATION_CANCELLED_CODE = 'GENERATION_CANCELLED';
+
+function createGenerationCancelledError(message = 'Generation cancelled by user') {
+  const err = new Error(message);
+  err.code = GENERATION_CANCELLED_CODE;
+  return err;
+}
+
+function isAbortError(err) {
+  return Boolean(err && err.name === 'AbortError');
+}
+
+async function throwIfCancelled({
+  abortSignal,
+  shouldCancel,
+  message = 'Generation cancelled by user',
+}) {
+  if (abortSignal?.aborted) {
+    throw createGenerationCancelledError(message);
+  }
+
+  if (typeof shouldCancel === 'function') {
+    const cancelled = await shouldCancel();
+    if (cancelled) {
+      throw createGenerationCancelledError(message);
+    }
+  }
+
+  if (abortSignal?.aborted) {
+    throw createGenerationCancelledError(message);
+  }
+}
 
 /**
  * Run the full Pixar GIF generation pipeline.
@@ -14,8 +48,12 @@ async function runGenerationPipeline({
   photoUrl,
   photoBase64,
   firstName,
+  lastName,
   greeting,
   ctaText,
+  onProgress,
+  abortSignal,
+  shouldCancel,
 }) {
   const startTime = Date.now();
   let creditDeducted = false;
@@ -32,6 +70,8 @@ async function runGenerationPipeline({
       err.code = 'INVALID_INPUT';
       throw err;
     }
+
+    await throwIfCancelled({ abortSignal, shouldCancel });
 
     console.log(`[Generate] Starting for ${firstName} (user: ${userId})`);
 
@@ -52,6 +92,8 @@ async function runGenerationPipeline({
     creditDeducted = true;
     const creditsRemaining = deducted[0].balance;
     console.log(`[Generate] Deducted 1 credit, balance now ${creditsRemaining}`);
+
+    await throwIfCancelled({ abortSignal, shouldCancel });
 
     let originalPhotoS3Url = null;
     if (photoBase64) {
@@ -74,9 +116,17 @@ async function runGenerationPipeline({
             return null;
           })
         : Promise.resolve(null),
-      generatePixarImage(imageInput),
+      generatePixarImage(imageInput, { signal: abortSignal }),
     ]);
 
+    await throwIfCancelled({ abortSignal, shouldCancel });
+
+    // Report silhouette URL mid-flight so the extension can show it during preview
+    if (silhouetteUrl && typeof onProgress === 'function') {
+      onProgress({ silhouette_url: silhouetteUrl }).catch((err) => {
+        console.warn('[Generate] Failed to report silhouette progress:', err.message);
+      });
+    }
     let phase1Promise = null;
     if (originalPhotoS3Url) {
       console.log('[Generate] Step 3a: Starting Remotion Phase 1 (frames 0-44)...');
@@ -89,6 +139,7 @@ async function runGenerationPipeline({
         greeting: greetingText,
         ctaText: ctaTextFinal,
         frameRange: [0, 44],
+        signal: abortSignal,
       }).catch((err) => {
         console.warn('[Generate] Phase 1 render failed (non-fatal):', err.message);
         return null;
@@ -96,7 +147,9 @@ async function runGenerationPipeline({
     }
 
     console.log('[Generate] Step 2: Generating video...');
-    const videoUrl = await generateVideo(pixarImageUrl);
+    const videoUrl = await generateVideo(pixarImageUrl, { signal: abortSignal });
+
+    await throwIfCancelled({ abortSignal, shouldCancel });
 
     const phase1Mp4 = phase1Promise ? await phase1Promise : null;
 
@@ -112,7 +165,10 @@ async function runGenerationPipeline({
         greeting: greetingText,
         ctaText: ctaTextFinal,
         frameRange: [45, 149],
+        signal: abortSignal,
       });
+
+      await throwIfCancelled({ abortSignal, shouldCancel });
 
       console.log('[Generate] Step 3c: Concatenating phases...');
       mp4Url = await concatMp4s(phase1Mp4, phase2Mp4);
@@ -126,17 +182,38 @@ async function runGenerationPipeline({
         firstName,
         greeting: greetingText,
         ctaText: ctaTextFinal,
+        signal: abortSignal,
       });
     }
 
-    console.log('[Generate] Step 3.5: Converting MP4 to GIF...');
-    const gifUrl = await convertMp4ToGif(mp4Url);
+    await throwIfCancelled({ abortSignal, shouldCancel });
+
+    // Step 3.5: Apply greeting and CTA text via ffmpeg drawtext.
+    // mp4Url (pre-text) is stored so text can be re-applied cheaply later.
+    console.log('[Generate] Step 3.5: Applying text overlay...');
+    if (typeof onProgress === 'function') {
+      onProgress({ current_step: 'compose' }).catch((err) => {
+        console.warn('[Generate] Failed to report compose progress:', err.message);
+      });
+    }
+    const mp4NoTextUrl = mp4Url;
+    const mp4WithTextUrl = await applyTextOverlay(mp4Url, {
+      greeting: greetingText,
+      ctaText: ctaTextFinal,
+    });
+
+    await throwIfCancelled({ abortSignal, shouldCancel });
+
+    console.log('[Generate] Step 4: Converting MP4 to GIF...');
+    const gifUrl = await convertMp4ToGif(mp4WithTextUrl);
+
+    await throwIfCancelled({ abortSignal, shouldCancel });
 
     const { error: usageTxError } = await supabase.from('transactions').insert({
       user_id: userId,
       type: 'usage',
       amount: -1,
-      description: `Generated Pixar GIF for ${firstName}`,
+      description: `Generated Pixar GIF for ${firstName}${lastName ? ' ' + lastName : ''}`,
     });
 
     if (usageTxError) {
@@ -149,7 +226,9 @@ async function runGenerationPipeline({
         user_id: userId,
         linkedin_profile_url: photoUrl || null,
         gif_url: gifUrl,
+        mp4_no_text_url: mp4NoTextUrl,
         first_name: firstName,
+        last_name: lastName || null,
       })
       .select('id')
       .single();
@@ -163,7 +242,9 @@ async function runGenerationPipeline({
 
     return {
       gifUrl,
-      mp4Url,
+      silhouetteUrl,
+      mp4Url: mp4WithTextUrl,
+      mp4NoTextUrl,
       pixarImageUrl,
       videoUrl,
       creditsRemaining,
@@ -171,6 +252,11 @@ async function runGenerationPipeline({
       generationId: generationRow?.id || null,
     };
   } catch (err) {
+    const normalizedError =
+      err.code === GENERATION_CANCELLED_CODE || isAbortError(err) || abortSignal?.aborted
+        ? createGenerationCancelledError()
+        : err;
+
     if (creditDeducted) {
       try {
         await supabase.rpc('refund_credit', { p_user_id: userId });
@@ -180,7 +266,7 @@ async function runGenerationPipeline({
       }
     }
 
-    throw err;
+    throw normalizedError;
   }
 }
 

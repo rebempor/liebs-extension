@@ -7,7 +7,7 @@ const {
   cancelGenerationJob,
 } = require('../services/generationJobs');
 const { trackError } = require('../services/errorTracker');
-const { applyTextOverlay } = require('../services/textOverlay');
+const { applyTextAndConvertToGif } = require('../services/textOverlay');
 
 const router = express.Router();
 
@@ -264,15 +264,13 @@ router.post('/generations/:id/restamp-text', requireAuth, async (req, res) => {
       });
     }
 
-    const { convertMp4ToGif } = require('../services/videoCompress');
-
     console.log(`[Restamp] Re-applying text for generation ${id}`);
-    const mp4WithTextUrl = await applyTextOverlay(generation.mp4_no_text_url, {
-      greeting: greeting || `Hey, ${generation.first_name}!`,
-      ctaText: ctaText || 'Open to talk?',
-    });
-
-    const gifUrl = await convertMp4ToGif(mp4WithTextUrl);
+    const { mp4WithTextUrl, gifUrl } = await applyTextAndConvertToGif(
+      generation.mp4_no_text_url, {
+        greeting: greeting || `Hey, ${generation.first_name}!`,
+        ctaText: ctaText || 'Open to talk?',
+      }
+    );
 
     const { error: updateError } = await req.supabase
       .from('generations')

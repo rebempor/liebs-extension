@@ -14,6 +14,91 @@ const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 
 const s3Client = new S3Client({ region: process.env.REMOTION_AWS_REGION || 'us-east-1' });
 
+function readIntegerEnv(name, fallback, { min, max } = {}) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) {
+    console.warn(`[MP4toGIF] Invalid ${name}="${raw}". Using fallback ${fallback}.`);
+    return fallback;
+  }
+
+  if (min !== undefined && parsed < min) {
+    console.warn(`[MP4toGIF] ${name} must be >= ${min}. Using fallback ${fallback}.`);
+    return fallback;
+  }
+
+  if (max !== undefined && parsed > max) {
+    console.warn(`[MP4toGIF] ${name} must be <= ${max}. Using fallback ${fallback}.`);
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function normalizeGifProfileName(value) {
+  if (!value || typeof value !== 'string') {
+    return 'optimized';
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'legacy') {
+    return 'legacy';
+  }
+  if (normalized === 'optimized') {
+    return 'optimized';
+  }
+
+  console.warn(`[MP4toGIF] Unknown GIF profile "${value}". Falling back to optimized.`);
+  return 'optimized';
+}
+
+function resolveGifProfile(profileName) {
+  const selectedProfile = normalizeGifProfileName(profileName);
+
+  if (selectedProfile === 'legacy') {
+    return {
+      name: 'legacy',
+      fps: 10,
+      width: null,
+      maxColors: 256,
+      bayerScale: 3,
+    };
+  }
+
+  return {
+    name: 'optimized',
+    fps: readIntegerEnv('GIF_FPS', 8, { min: 4, max: 20 }),
+    width: readIntegerEnv('GIF_WIDTH', 360, { min: 180, max: 1080 }),
+    maxColors: readIntegerEnv('GIF_MAX_COLORS', 96, { min: 16, max: 256 }),
+    bayerScale: readIntegerEnv('GIF_BAYER_SCALE', 2, { min: 0, max: 5 }),
+  };
+}
+
+function buildGifFilter(profile) {
+  const preSplit = [];
+
+  if (profile.width) {
+    preSplit.push(`scale=${profile.width}:-1:flags=lanczos`);
+  }
+
+  preSplit.push(`fps=${profile.fps}`);
+
+  return (
+    `${preSplit.join(',')},` +
+    `split[s0][s1];` +
+    `[s0]palettegen=stats_mode=diff:max_colors=${profile.maxColors}[p];` +
+    `[s1][p]paletteuse=dither=bayer:bayer_scale=${profile.bayerScale}`
+  );
+}
+
+function formatMegabytes(bytes) {
+  return (bytes / 1024 / 1024).toFixed(2);
+}
+
 /**
  * Download file from URL
  */
@@ -154,30 +239,71 @@ async function uploadBase64ImageToS3(base64Data) {
 }
 
 /**
+ * Convert local MP4 file to GIF with a selectable profile.
+ * @param {Object} options
+ * @param {string} options.inputPath - Local path to MP4 input
+ * @param {string} options.outputPath - Local path for GIF output
+ * @param {string} [options.profileName] - "legacy" or "optimized"
+ * @returns {Promise<{outputSize: number, elapsedMs: number, profile: Object}>}
+ */
+async function convertLocalMp4ToGif({ inputPath, outputPath, profileName }) {
+  const profile = resolveGifProfile(profileName || process.env.GIF_OUTPUT_PROFILE || 'optimized');
+  const filter = buildGifFilter(profile);
+  const startedAt = Date.now();
+
+  const cmd =
+    `ffmpeg -y -i "${inputPath}" ` +
+    `-vf "${filter}" ` +
+    `-gifflags -offsetting ` +
+    `"${outputPath}"`;
+
+  console.log(
+    `[MP4toGIF] Converting with profile=${profile.name} ` +
+      `(${profile.width || 'source'}px, ${profile.fps}fps, ${profile.maxColors} colors)...`
+  );
+
+  await execAsync(cmd);
+
+  const elapsedMs = Date.now() - startedAt;
+  const outputSize = fs.statSync(outputPath).size;
+  console.log(`[MP4toGIF] GIF size: ${formatMegabytes(outputSize)} MB`);
+  console.log(`[MP4toGIF] Conversion time: ${(elapsedMs / 1000).toFixed(2)}s`);
+
+  return {
+    outputSize,
+    elapsedMs,
+    profile,
+  };
+}
+
+/**
  * Convert MP4 to GIF using FFmpeg two-pass palettegen
  * @param {string} mp4Url - URL of the MP4 to convert
+ * @param {Object} [options]
+ * @param {string} [options.profileName] - "legacy" or "optimized"
  * @returns {Promise<string>} - S3 URL of the generated GIF
  */
-async function convertMp4ToGif(mp4Url) {
+async function convertMp4ToGif(mp4Url, options = {}) {
   const tmpDir = '/tmp';
   const timestamp = Date.now();
   const inputPath = path.join(tmpDir, `gif-input-${timestamp}.mp4`);
   const outputPath = path.join(tmpDir, `output-${timestamp}.gif`);
+  const { profileName } = options;
 
   try {
     console.log('[MP4toGIF] Downloading MP4...');
     await downloadFile(mp4Url, inputPath);
 
     const inputSize = fs.statSync(inputPath).size;
-    console.log(`[MP4toGIF] Input size: ${(inputSize / 1024 / 1024).toFixed(2)} MB`);
+    console.log(`[MP4toGIF] Input size: ${formatMegabytes(inputSize)} MB`);
 
-    // Two-pass palettegen for high-quality GIF with small file size
-    const cmd = `ffmpeg -y -i "${inputPath}" -vf "fps=10,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3" "${outputPath}"`;
-    console.log('[MP4toGIF] Converting with FFmpeg palettegen...');
-    await execAsync(cmd);
-
-    const outputSize = fs.statSync(outputPath).size;
-    console.log(`[MP4toGIF] GIF size: ${(outputSize / 1024 / 1024).toFixed(2)} MB`);
+    const { outputSize, profile } = await convertLocalMp4ToGif({
+      inputPath,
+      outputPath,
+      profileName,
+    });
+    console.log(`[MP4toGIF] Reduction vs input: ${((1 - outputSize / inputSize) * 100).toFixed(0)}%`);
+    console.log(`[MP4toGIF] Active profile: ${profile.name}`);
 
     console.log('[MP4toGIF] Uploading GIF to S3...');
     const s3Key = `generated-gifs/${timestamp}.gif`;
@@ -247,4 +373,11 @@ async function concatMp4s(url1, url2) {
   }
 }
 
-module.exports = { compressAndUpload, convertMp4ToGif, uploadBase64ImageToS3, concatMp4s };
+module.exports = {
+  resolveGifProfile,
+  buildGifFilter,
+  compressAndUpload,
+  convertMp4ToGif,
+  uploadBase64ImageToS3,
+  concatMp4s,
+};

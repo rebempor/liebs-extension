@@ -1,10 +1,8 @@
 /**
- * Text Overlay Service
+ * Text Overlay / Compose Service
  *
  * Applies greeting and CTA text onto a pre-rendered MP4 using ffmpeg's drawtext
- * filter. This replaces the previous approach of baking text into the Remotion
- * render, allowing text to be changed cheaply without re-running the expensive
- * Lambda render.
+ * filter and optionally converts to GIF in the same ffmpeg invocation.
  *
  * Text timing matches the original Remotion composition (30fps, 150 frames):
  *   Greeting: frames 0–60  (0.000–2.000s), fade in 0–0.267s, fade out 1.600–2.000s
@@ -26,6 +24,7 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { resolveGifProfile, buildGifFilter } = require('./videoCompress');
 
 const s3Client = new S3Client({ region: process.env.REMOTION_AWS_REGION || 'us-east-1' });
 const S3_BUCKET = 'remotionlambda-useast1-1fylxi4xgh';
@@ -45,7 +44,7 @@ function resolveFontPath() {
   for (const candidate of FONT_FALLBACKS) {
     if (fs.existsSync(candidate)) return candidate;
   }
-  console.warn('[TextOverlay] No font file found. Text may render in default ffmpeg font.');
+  console.warn('[Compose] No font file found. Text may render in default ffmpeg font.');
   return null;
 }
 
@@ -97,7 +96,7 @@ async function probeVideoWidth(filePath) {
   );
   const width = parseInt(stdout.trim(), 10);
   if (!width || isNaN(width)) {
-    console.warn('[TextOverlay] Could not probe video width, assuming 1080');
+    console.warn('[Compose] Could not probe video width, assuming 1080');
     return DESIGN_WIDTH;
   }
   return width;
@@ -106,56 +105,24 @@ async function probeVideoWidth(filePath) {
 /**
  * Scale a font size for the actual video width, with an overflow guard
  * that shrinks text if it would be wider than maxWidthRatio of the video.
- *
- * @param {number} designFontSize  Font size at 1080px design resolution
- * @param {number} scaleFactor     actualWidth / DESIGN_WIDTH
- * @param {string} text            The text string to check for overflow
- * @param {number} videoWidth      Actual video width in pixels
- * @param {number} [maxWidthRatio] Max fraction of video width text may occupy
  */
 function scaleFontSize(designFontSize, scaleFactor, text, videoWidth, maxWidthRatio = 0.85) {
   let fontSize = Math.round(designFontSize * scaleFactor);
-  // Rough heuristic: average char width ≈ 0.6 × fontSize for bold sans-serif
   const estimatedTextWidth = text.length * fontSize * 0.6;
   const maxPx = videoWidth * maxWidthRatio;
   if (estimatedTextWidth > maxPx && text.length > 0) {
     fontSize = Math.floor(maxPx / (text.length * 0.6));
   }
-  return Math.max(fontSize, 8); // floor at 8px
+  return Math.max(fontSize, 8);
 }
 
 /**
  * Build the ffmpeg drawtext filter string for one text layer.
- *
- * Uses a textfile instead of inline text= to avoid shell-escaping issues
- * with arbitrary user input (apostrophes, commas, colons, etc.).
- *
- * @param {Object} opts
- * @param {string} opts.textfilePath  Path to temp file containing the text
- * @param {string|null} opts.fontPath Path to the bold TTF font (or null)
- * @param {number} opts.fontSize      Font size in pixels (already scaled)
- * @param {number} opts.borderw       Border width in pixels (already scaled)
- * @param {number} opts.yOffset       Bottom padding in pixels (already scaled)
- * @param {number} opts.startTime     Start of visibility window (seconds)
- * @param {number} opts.endTime       End of visibility window (seconds)
- * @param {number} opts.fadeInStart   Start of fade-in (seconds)
- * @param {number} opts.fadeInEnd     End of fade-in (seconds)
- * @param {number|null} opts.fadeOutStart Start of fade-out (null = no fade-out)
- * @param {number|null} opts.fadeOutEnd   End of fade-out (null = no fade-out)
  */
 function buildDrawtextFilter(opts) {
   const {
-    textfilePath,
-    fontPath,
-    fontSize,
-    borderw,
-    yOffset,
-    startTime,
-    endTime,
-    fadeInStart,
-    fadeInEnd,
-    fadeOutStart,
-    fadeOutEnd,
+    textfilePath, fontPath, fontSize, borderw, yOffset,
+    startTime, endTime, fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd,
   } = opts;
 
   const fadeInDur = fadeInEnd - fadeInStart;
@@ -191,112 +158,177 @@ function buildDrawtextFilter(opts) {
 }
 
 /**
- * Apply greeting and CTA text overlays onto an MP4 via ffmpeg drawtext.
- *
- * @param {string} mp4Url    S3/HTTPS URL of the pre-rendered MP4 (no text)
- * @param {Object} opts
- * @param {string} opts.greeting  Greeting text (e.g. "Hey, John!")
- * @param {string} opts.ctaText   CTA text (e.g. "Open to talk?")
- * @returns {Promise<string>} S3 URL of the new MP4 with text baked in
+ * Shared helper: download MP4, probe dimensions, scale fonts, build drawtext filters.
+ * Returns the local paths, filter chain, and scale info for the caller to compose
+ * into a full ffmpeg command.
  */
-async function applyTextOverlay(mp4Url, { greeting, ctaText }) {
+async function prepareTextFilters(mp4Url, { greeting, ctaText }) {
   const tmpDir = '/tmp';
   const timestamp = Date.now();
 
-  const inputPath = path.join(tmpDir, `text-input-${timestamp}.mp4`);
-  const outputPath = path.join(tmpDir, `text-output-${timestamp}.mp4`);
+  const inputPath = path.join(tmpDir, `compose-input-${timestamp}.mp4`);
   const greetingTextPath = path.join(tmpDir, `greeting-${timestamp}.txt`);
   const ctaTextPath = path.join(tmpDir, `cta-${timestamp}.txt`);
 
-  const tempFiles = [inputPath, outputPath, greetingTextPath, ctaTextPath];
+  console.log('[Compose] Downloading MP4...');
+  await downloadFile(mp4Url, inputPath);
+
+  const fontPath = resolveFontPath();
+  if (fontPath) {
+    console.log(`[Compose] Using font: ${fontPath}`);
+  }
+
+  const videoWidth = await probeVideoWidth(inputPath);
+  const scale = videoWidth / DESIGN_WIDTH;
+  console.log(`[Compose] Video width: ${videoWidth}px (scale: ${scale.toFixed(2)} vs ${DESIGN_WIDTH}px design)`);
+
+  const greetingText = greeting || '';
+  const ctaTextStr = ctaText || '';
+
+  const greetingFontSize = scaleFontSize(90, scale, greetingText, videoWidth);
+  const ctaFontSize = scaleFontSize(72, scale, ctaTextStr, videoWidth);
+  const borderW = Math.max(2, Math.round(6 * scale));
+  const yOffset = Math.max(10, Math.round(80 * scale));
+
+  console.log(`[Compose] Scaled sizes: greeting=${greetingFontSize}px, cta=${ctaFontSize}px, border=${borderW}px, yOffset=${yOffset}px`);
+
+  fs.writeFileSync(greetingTextPath, greetingText);
+  fs.writeFileSync(ctaTextPath, ctaTextStr);
+
+  const greetingFilter = buildDrawtextFilter({
+    textfilePath: greetingTextPath, fontPath,
+    fontSize: greetingFontSize, borderw: borderW, yOffset,
+    startTime: 0, endTime: 2.0,
+    fadeInStart: 0, fadeInEnd: 0.267,
+    fadeOutStart: 1.6, fadeOutEnd: 2.0,
+  });
+
+  const ctaFilter = buildDrawtextFilter({
+    textfilePath: ctaTextPath, fontPath,
+    fontSize: ctaFontSize, borderw: borderW, yOffset,
+    startTime: 3.333, endTime: 5.0,
+    fadeInStart: 3.333, fadeInEnd: 3.833,
+    fadeOutStart: null, fadeOutEnd: null,
+  });
+
+  const drawtextChain = `${greetingFilter},${ctaFilter}`;
+
+  return {
+    inputPath,
+    greetingTextPath,
+    ctaTextPath,
+    drawtextChain,
+    timestamp,
+  };
+}
+
+function formatMB(bytes) {
+  return (bytes / 1024 / 1024).toFixed(2);
+}
+
+/**
+ * Apply text overlay AND convert to GIF in a single ffmpeg invocation.
+ *
+ * Produces two outputs:
+ *   1. Text-overlaid MP4 (stored for re-stamp backup)
+ *   2. Optimized GIF (final deliverable)
+ *
+ * @param {string} mp4Url    S3/HTTPS URL of the pre-rendered MP4 (no text)
+ * @param {Object} opts
+ * @param {string} opts.greeting  Greeting text
+ * @param {string} opts.ctaText   CTA text
+ * @returns {Promise<{mp4WithTextUrl: string, gifUrl: string}>}
+ */
+async function applyTextAndConvertToGif(mp4Url, { greeting, ctaText }) {
+  const {
+    inputPath, greetingTextPath, ctaTextPath, drawtextChain, timestamp,
+  } = await prepareTextFilters(mp4Url, { greeting, ctaText });
+
+  const mp4OutputPath = path.join('/tmp', `compose-mp4-${timestamp}.mp4`);
+  const gifOutputPath = path.join('/tmp', `compose-gif-${timestamp}.gif`);
+  const tempFiles = [inputPath, mp4OutputPath, gifOutputPath, greetingTextPath, ctaTextPath];
 
   try {
-    console.log('[TextOverlay] Downloading MP4...');
-    await downloadFile(mp4Url, inputPath);
+    const gifProfile = resolveGifProfile(process.env.GIF_OUTPUT_PROFILE);
+    const gifFilter = buildGifFilter(gifProfile);
 
-    const fontPath = resolveFontPath();
-    if (fontPath) {
-      console.log(`[TextOverlay] Using font: ${fontPath}`);
-    }
+    console.log(
+      `[Compose] GIF profile: ${gifProfile.name} ` +
+      `(${gifProfile.width || 'source'}px, ${gifProfile.fps}fps, ${gifProfile.maxColors} colors)`
+    );
 
-    // Probe actual video width to scale font sizes proportionally
-    const videoWidth = await probeVideoWidth(inputPath);
-    const scale = videoWidth / DESIGN_WIDTH;
-    console.log(`[TextOverlay] Video width: ${videoWidth}px (scale: ${scale.toFixed(2)} vs ${DESIGN_WIDTH}px design)`);
+    // Single ffmpeg command: drawtext → split → MP4 + GIF
+    const filterComplex =
+      `[0:v]${drawtextChain},split=2[mp4][gifpipe];` +
+      `[gifpipe]${gifFilter}[gif]`;
 
-    const greetingText = greeting || '';
-    const ctaTextStr = ctaText || '';
-
-    // Scale all pixel values from 1080px design to actual video size
-    const greetingFontSize = scaleFontSize(90, scale, greetingText, videoWidth);
-    const ctaFontSize = scaleFontSize(72, scale, ctaTextStr, videoWidth);
-    const borderW = Math.max(2, Math.round(6 * scale));
-    const yOffset = Math.max(10, Math.round(80 * scale));
-
-    console.log(`[TextOverlay] Scaled sizes: greeting=${greetingFontSize}px, cta=${ctaFontSize}px, border=${borderW}px, yOffset=${yOffset}px`);
-
-    // Write text to temp files to avoid shell-escaping problems
-    fs.writeFileSync(greetingTextPath, greetingText);
-    fs.writeFileSync(ctaTextPath, ctaTextStr);
-
-    // Greeting: frames 0–60 at 30fps = 0.000–2.000s
-    //   fade in:  frames 0–8   = 0.000–0.267s
-    //   fade out: frames 48–60 = 1.600–2.000s
-    const greetingFilter = buildDrawtextFilter({
-      textfilePath: greetingTextPath,
-      fontPath,
-      fontSize: greetingFontSize,
-      borderw: borderW,
-      yOffset,
-      startTime: 0,
-      endTime: 2.0,
-      fadeInStart: 0,
-      fadeInEnd: 0.267,
-      fadeOutStart: 1.6,
-      fadeOutEnd: 2.0,
-    });
-
-    // CTA: frames 100–150 at 30fps = 3.333–5.000s
-    //   fade in: frames 100–115 = 3.333–3.833s
-    //   no fade out (plays to end)
-    const ctaFilter = buildDrawtextFilter({
-      textfilePath: ctaTextPath,
-      fontPath,
-      fontSize: ctaFontSize,
-      borderw: borderW,
-      yOffset,
-      startTime: 3.333,
-      endTime: 5.0,
-      fadeInStart: 3.333,
-      fadeInEnd: 3.833,
-      fadeOutStart: null,
-      fadeOutEnd: null,
-    });
-
-    const vfChain = `${greetingFilter},${ctaFilter}`;
-    // Re-encode at high quality (CRF 15) since this output feeds the GIF converter
     const cmd =
       `ffmpeg -y -i "${inputPath}" ` +
-      `-vf "${vfChain}" ` +
-      `-c:v libx264 -crf 15 -preset fast -an ` +
-      `"${outputPath}"`;
+      `-filter_complex "${filterComplex}" ` +
+      `-map "[mp4]" -c:v libx264 -crf 18 -preset ultrafast -an "${mp4OutputPath}" ` +
+      `-map "[gif]" -gifflags -offsetting "${gifOutputPath}"`;
 
-    console.log('[TextOverlay] Applying text overlays...');
+    console.log('[Compose] Running combined text+GIF ffmpeg...');
+    const startedAt = Date.now();
     await execAsync(cmd);
+    const elapsedMs = Date.now() - startedAt;
 
-    console.log('[TextOverlay] Uploading result to S3...');
-    const s3Key = `text-overlaid-mp4s/${timestamp}.mp4`;
-    const s3Url = await uploadToS3(outputPath, s3Key);
+    const mp4Size = fs.statSync(mp4OutputPath).size;
+    const gifSize = fs.statSync(gifOutputPath).size;
+    console.log(`[Compose] MP4: ${formatMB(mp4Size)} MB, GIF: ${formatMB(gifSize)} MB (${(elapsedMs / 1000).toFixed(1)}s)`);
 
-    console.log(`[TextOverlay] Done: ${s3Url}`);
-    return s3Url;
+    console.log('[Compose] Uploading MP4 and GIF to S3...');
+    const [mp4WithTextUrl, gifUrl] = await Promise.all([
+      uploadToS3(mp4OutputPath, `text-overlaid-mp4s/${timestamp}.mp4`),
+      uploadToS3(gifOutputPath, `generated-gifs/${timestamp}.gif`, 'image/gif'),
+    ]);
+
+    console.log(`[Compose] Done: MP4=${mp4WithTextUrl}`);
+    console.log(`[Compose] Done: GIF=${gifUrl}`);
+
+    return { mp4WithTextUrl, gifUrl };
   } finally {
     for (const f of tempFiles) {
       if (fs.existsSync(f)) {
-        try { fs.unlinkSync(f); } catch (_) { /* ignore cleanup errors */ }
+        try { fs.unlinkSync(f); } catch (_) { /* ignore */ }
       }
     }
   }
 }
 
-module.exports = { applyTextOverlay };
+/**
+ * Apply text overlay only (no GIF conversion).
+ * Used by the restamp-text endpoint when only the MP4 is needed standalone.
+ */
+async function applyTextOverlay(mp4Url, { greeting, ctaText }) {
+  const {
+    inputPath, greetingTextPath, ctaTextPath, drawtextChain, timestamp,
+  } = await prepareTextFilters(mp4Url, { greeting, ctaText });
+
+  const outputPath = path.join('/tmp', `text-output-${timestamp}.mp4`);
+  const tempFiles = [inputPath, outputPath, greetingTextPath, ctaTextPath];
+
+  try {
+    const cmd =
+      `ffmpeg -y -i "${inputPath}" ` +
+      `-vf "${drawtextChain}" ` +
+      `-c:v libx264 -crf 15 -preset fast -an ` +
+      `"${outputPath}"`;
+
+    console.log('[Compose] Applying text overlays (MP4 only)...');
+    await execAsync(cmd);
+
+    const s3Key = `text-overlaid-mp4s/${timestamp}.mp4`;
+    const s3Url = await uploadToS3(outputPath, s3Key);
+    console.log(`[Compose] Done: ${s3Url}`);
+    return s3Url;
+  } finally {
+    for (const f of tempFiles) {
+      if (fs.existsSync(f)) {
+        try { fs.unlinkSync(f); } catch (_) { /* ignore */ }
+      }
+    }
+  }
+}
+
+module.exports = { applyTextOverlay, applyTextAndConvertToGif };

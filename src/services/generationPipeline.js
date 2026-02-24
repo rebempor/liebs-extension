@@ -1,9 +1,9 @@
 const { generatePixarImage } = require('./fal');
 const { generateVideo } = require('./replicate');
 const { renderMp4 } = require('./remotion');
-const { convertMp4ToGif, uploadBase64ImageToS3, concatMp4s } = require('./videoCompress');
+const { uploadBase64ImageToS3, concatMp4s } = require('./videoCompress');
 const { removeBackground } = require('./backgroundRemoval');
-const { applyTextOverlay } = require('./textOverlay');
+const { applyTextAndConvertToGif } = require('./textOverlay');
 
 const GENERATION_CANCELLED_CODE = 'GENERATION_CANCELLED';
 
@@ -136,6 +136,8 @@ async function runGenerationPipeline({
         pixarImageUrl: originalPhotoS3Url,
         videoUrl: originalPhotoS3Url,
         firstName,
+        greeting: greetingText,
+        ctaText: ctaTextFinal,
         frameRange: [0, 44],
         signal: abortSignal,
       }).catch((err) => {
@@ -160,6 +162,8 @@ async function runGenerationPipeline({
         pixarImageUrl,
         videoUrl,
         firstName,
+        greeting: greetingText,
+        ctaText: ctaTextFinal,
         frameRange: [45, 149],
         signal: abortSignal,
       });
@@ -176,30 +180,27 @@ async function runGenerationPipeline({
         pixarImageUrl,
         videoUrl,
         firstName,
+        greeting: greetingText,
+        ctaText: ctaTextFinal,
         signal: abortSignal,
       });
     }
 
     await throwIfCancelled({ abortSignal, shouldCancel });
 
-    // Step 3.5: Apply greeting and CTA text via ffmpeg drawtext.
+    // Step 3.5+4: Apply text overlay and convert to GIF in a single ffmpeg pass.
     // mp4Url (pre-text) is stored so text can be re-applied cheaply later.
-    console.log('[Generate] Step 3.5: Applying text overlay...');
+    console.log('[Generate] Step 3.5+4: Composing text overlay + GIF...');
     if (typeof onProgress === 'function') {
       onProgress({ current_step: 'compose' }).catch((err) => {
         console.warn('[Generate] Failed to report compose progress:', err.message);
       });
     }
     const mp4NoTextUrl = mp4Url;
-    const mp4WithTextUrl = await applyTextOverlay(mp4Url, {
+    const { mp4WithTextUrl, gifUrl } = await applyTextAndConvertToGif(mp4Url, {
       greeting: greetingText,
       ctaText: ctaTextFinal,
     });
-
-    await throwIfCancelled({ abortSignal, shouldCancel });
-
-    console.log('[Generate] Step 4: Converting MP4 to GIF...');
-    const gifUrl = await convertMp4ToGif(mp4WithTextUrl);
 
     await throwIfCancelled({ abortSignal, shouldCancel });
 

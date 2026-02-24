@@ -136,8 +136,6 @@ async function runGenerationPipeline({
         pixarImageUrl: originalPhotoS3Url,
         videoUrl: originalPhotoS3Url,
         firstName,
-        greeting: greetingText,
-        ctaText: ctaTextFinal,
         frameRange: [0, 44],
         signal: abortSignal,
       }).catch((err) => {
@@ -162,8 +160,6 @@ async function runGenerationPipeline({
         pixarImageUrl,
         videoUrl,
         firstName,
-        greeting: greetingText,
-        ctaText: ctaTextFinal,
         frameRange: [45, 149],
         signal: abortSignal,
       });
@@ -180,8 +176,6 @@ async function runGenerationPipeline({
         pixarImageUrl,
         videoUrl,
         firstName,
-        greeting: greetingText,
-        ctaText: ctaTextFinal,
         signal: abortSignal,
       });
     }

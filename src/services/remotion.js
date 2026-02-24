@@ -12,6 +12,45 @@
  */
 
 const { renderMediaOnLambda, getRenderProgress } = require('@remotion/lambda/client');
+const GENERATION_CANCELLED_CODE = 'GENERATION_CANCELLED';
+
+function createGenerationCancelledError(message = 'Generation cancelled by user') {
+  const err = new Error(message);
+  err.code = GENERATION_CANCELLED_CODE;
+  return err;
+}
+
+function throwIfCancelled(signal) {
+  if (signal?.aborted) {
+    throw createGenerationCancelledError();
+  }
+}
+
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createGenerationCancelledError());
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+
+    function onAbort() {
+      clearTimeout(timeoutId);
+      cleanup();
+      reject(createGenerationCancelledError());
+    }
+
+    function cleanup() {
+      signal?.removeEventListener('abort', onAbort);
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 function normalizeOptionalHttpUrl(value) {
   if (!value) {
@@ -95,39 +134,6 @@ function readOptionalNumberEnv(name, { integer = false, min, max } = {}) {
   return parsed;
 }
 
-function readBooleanEnv(name, fallback) {
-  const raw = process.env[name];
-  if (raw === undefined || raw === null || raw.trim() === '') {
-    return fallback;
-  }
-
-  const normalized = raw.trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
-    return true;
-  }
-  if (['0', 'false', 'no', 'off'].includes(normalized)) {
-    return false;
-  }
-
-  console.warn(`[Remotion] Invalid ${name}="${raw}". Using fallback ${fallback}.`);
-  return fallback;
-}
-
-function estimateEffectiveFrameCount(frameRange, everyNthFrame) {
-  if (!Array.isArray(frameRange) || frameRange.length !== 2) {
-    return null;
-  }
-
-  const start = Number(frameRange[0]);
-  const end = Number(frameRange[1]);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
-    return null;
-  }
-
-  const totalFrames = end - start + 1;
-  return Math.floor((totalFrames - 1) / everyNthFrame) + 1;
-}
-
 /**
  * Render MP4 using Remotion Lambda
  *
@@ -137,15 +143,23 @@ function estimateEffectiveFrameCount(frameRange, everyNthFrame) {
  * @param {string} options.pixarImageUrl - URL of Pixar-transformed image
  * @param {string} options.videoUrl - URL of generated video
  * @param {string} options.firstName - User's first name
- * @param {string} options.greeting - Greeting text
- * @param {string} options.ctaText - Call to action text
  * @param {number[]} [options.frameRange] - Optional [start, end] frame range to render
+ * @param {AbortSignal} [options.signal] - Optional abort signal for cancellation
  * @returns {Promise<string>} - URL to the rendered MP4
  */
-async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, videoUrl, firstName, greeting, ctaText, frameRange }) {
+async function renderMp4({
+  originalPhotoUrl,
+  silhouetteUrl,
+  pixarImageUrl,
+  videoUrl,
+  firstName,
+  frameRange,
+  signal,
+}) {
   const rangeLabel = frameRange ? ` (frames ${frameRange[0]}-${frameRange[1]})` : '';
   console.log(`[Remotion] Starting Lambda render (MP4)${rangeLabel}...`);
-  console.log(`[Remotion] Props: firstName=${firstName}, greeting="${greeting}", cta="${ctaText}"`);
+  console.log(`[Remotion] Props: firstName=${firstName}`);
+  throwIfCancelled(signal);
 
   const region = process.env.REMOTION_AWS_REGION || 'us-east-1';
   const functionName = process.env.REMOTION_FUNCTION_NAME;
@@ -164,8 +178,6 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
 
   const inputProps = {
     firstName,
-    greeting,
-    ctaText,
     originalPhotoUrl,
     silhouetteUrl,
     pixarImageUrl,
@@ -181,14 +193,6 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
   const framesPerLambdaEnv = readOptionalNumberEnv('REMOTION_FRAMES_PER_LAMBDA', { integer: true, min: 4, max: 200 });
   const concurrencyEnv = readOptionalNumberEnv('REMOTION_CONCURRENCY', { integer: true, min: 1, max: 1000 });
   const concurrencyPerLambda = readNumberEnv('REMOTION_CONCURRENCY_PER_LAMBDA', 1, { integer: true, min: 1, max: 4 });
-  const dynamicConcurrencyEnabled = readBooleanEnv('REMOTION_DYNAMIC_CONCURRENCY', true);
-  const concurrencyLongFallback = readNumberEnv('REMOTION_CONCURRENCY_LONG', 20, { integer: true, min: 1, max: 1000 });
-  const shortMaxEffectiveFrames = readNumberEnv('REMOTION_CONCURRENCY_SHORT_MAX_EFFECTIVE_FRAMES', 20, {
-    integer: true,
-    min: 1,
-    max: 300,
-  });
-  const shortConcurrencyEnv = readOptionalNumberEnv('REMOTION_CONCURRENCY_SHORT', { integer: true, min: 1, max: 1000 });
 
   let chunkingMode;
   const chunkingOptions = {};
@@ -200,29 +204,17 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
     );
     chunkingMode = `concurrency:${concurrencyEnv}`;
     chunkingOptions.concurrency = concurrencyEnv;
+  } else if (concurrencyEnv !== null) {
+    chunkingMode = `concurrency:${concurrencyEnv}`;
+    chunkingOptions.concurrency = concurrencyEnv;
   } else if (framesPerLambdaEnv !== null) {
     chunkingMode = `framesPerLambda:${framesPerLambdaEnv}`;
     chunkingOptions.framesPerLambda = framesPerLambdaEnv;
   } else {
-    const longConcurrency = concurrencyEnv ?? concurrencyLongFallback;
-
-    if (!dynamicConcurrencyEnabled) {
-      chunkingMode = `concurrency:${longConcurrency}${concurrencyEnv === null ? ' (default)' : ''}`;
-      chunkingOptions.concurrency = longConcurrency;
-    } else {
-      const effectiveFrames = estimateEffectiveFrameCount(frameRange, everyNthFrame);
-      const autoShortConcurrency = Math.max(4, Math.min(longConcurrency, Math.round(longConcurrency / 3)));
-      const shortConcurrency = shortConcurrencyEnv ?? autoShortConcurrency;
-
-      if (effectiveFrames !== null && effectiveFrames <= shortMaxEffectiveFrames) {
-        chunkingMode = `concurrency:${shortConcurrency} (dynamic-short effectiveFrames=${effectiveFrames})`;
-        chunkingOptions.concurrency = shortConcurrency;
-      } else {
-        const frameHint = effectiveFrames === null ? 'unknown' : String(effectiveFrames);
-        chunkingMode = `concurrency:${longConcurrency} (dynamic-long effectiveFrames=${frameHint})`;
-        chunkingOptions.concurrency = longConcurrency;
-      }
-    }
+    // Default to concurrency-driven fan-out for faster short renders.
+    const defaultConcurrency = 24;
+    chunkingMode = `concurrency:${defaultConcurrency} (default)`;
+    chunkingOptions.concurrency = defaultConcurrency;
   }
 
   console.log(
@@ -256,6 +248,7 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
 
   console.log(`[Remotion] Render started: ${renderId}`);
   console.log(`[Remotion] Bucket: ${bucketName}`);
+  throwIfCancelled(signal);
 
   // Poll for completion
   let progress;
@@ -263,8 +256,9 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
   const maxPolls = 120; // 4 minutes max (2s intervals)
 
   do {
-    await new Promise(r => setTimeout(r, 2000));
+    await sleep(2000, signal);
     pollCount++;
+    throwIfCancelled(signal);
 
     progress = await getRenderProgress({
       renderId,
@@ -272,6 +266,7 @@ async function renderMp4({ originalPhotoUrl, silhouetteUrl, pixarImageUrl, video
       functionName,
       region,
     });
+    throwIfCancelled(signal);
 
     const pct = Math.round(progress.overallProgress * 100);
     console.log(`[Remotion] Progress: ${pct}% (poll ${pollCount})`);

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Liebs GIF Generator</title>
+  <link rel="stylesheet" href="popup.css">
+<style>*,*::before,*::after{animation:none!important;transition:none!important}</style></head>
+<body>
+  <div class="container">
+
+    <!-- 1. Header -->
+    <header class="popup-header">
+      <span class="header-logo">Liebs</span>
+    </header>
+
+    <!-- Status Banner -->
+    <div id="status-banner" class="status-banner hidden">
+      <span class="status-text"></span>
+    </div>
+
+    <!-- Auth View (Login/Signup) -->
+    <div id="auth-view" class="view">
+      <div class="auth-form">
+        <h2>Connect your account</h2>
+        <p class="auth-switch" style="margin-bottom: 18px;">
+          Sign in or create your account in the browser, then the extension will finish the connection for you.
+        </p>
+        <button id="browser-auth-btn" class="btn primary">Continue in browser</button>
+      </div>
+    </div>
+
+    <!-- Main View (Logged In) -->
+    <div id="main-view" class="view hidden">
+
+      <section class="launcher-section">
+        <h3 class="section-label">Create</h3>
+        <div class="launcher-grid">
+          <button id="launch-gif-btn" class="launcher-card" type="button">
+            <span class="launcher-title">GIF</span>
+            <span class="launcher-copy">Use the LinkedIn page button</span>
+          </button>
+          <button id="launch-video-btn" class="launcher-card launcher-card--video" type="button">
+            <span class="launcher-title">Video</span>
+            <span class="launcher-copy">Open the page studio</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- 2. Message Template -->
+      <section class="template-section">
+        <div class="template-row">
+          <label class="template-label" for="greeting-template">Greeting</label>
+          <input type="text" id="greeting-template" value="Hey, {name}!" placeholder="Hey, {name}!" maxlength="60">
+        </div>
+        <small class="setting-hint">Sprinkle {name} for their first name, {lastName} for their full surname ✨</small>
+        <div class="template-row">
+          <label class="template-label" for="cta-text">The Ask</label>
+          <input type="text" id="cta-text" value="Open to talk?" placeholder="Open to talk?" maxlength="60">
+        </div>
+        <p class="template-helper">Conjure the ask — and make it land 🪄 <span class="template-saved-indicator" id="template-saved">Saved</span></p>
+      </section>
+
+      <!-- 3. Outreach Mode -->
+      <section class="outreach-section">
+        <div class="outreach-row">
+          <div class="outreach-copy">
+            <h3 class="section-label">Outreach Mode</h3>
+            <p id="outreach-status" class="outreach-status">Off</p>
+          </div>
+          <label class="outreach-toggle" for="outreach-toggle-input">
+            <input type="checkbox" id="outreach-toggle-input" aria-label="Toggle Outreach Mode">
+            <span class="outreach-toggle-track"></span>
+          </label>
+        </div>
+        <div id="outreach-stats" class="outreach-stats hidden">
+          <span id="outreach-count" class="outreach-count">0 profiles prepped</span>
+          <span id="outreach-timer" class="outreach-timer">90:00</span>
+        </div>
+      </section>
+
+      <!-- 3. History -->
+      <section class="history-section">
+        <div class="history-tabs" role="tablist" aria-label="History type">
+          <button class="history-tab active" data-tab="gifs" role="tab" aria-selected="true" type="button">GIFs</button>
+          <button class="history-tab" data-tab="videos" role="tab" aria-selected="false" type="button">Videos</button>
+        </div>
+        <div id="history-list" class="history-list" data-tab-content="gifs">
+          <p class="history-empty">Nothing here yet... go make some magic! ✨</p>
+        </div>
+        <div id="video-history-list" class="history-list hidden" data-tab-content="videos">
+          <p class="history-empty">No videos yet... create your first one! 🎬</p>
+        </div>
+      </section>
+
+      <!-- 4. Footer -->
+      <footer class="popup-footer">
+        <span class="footer-email" id="user-email">demo@example.com</span>
+        <div class="footer-right">
+          <span class="footer-plan" id="plan-name">Free</span>
+          <span class="footer-credits"><span id="credits-balance">12</span> charms left</span>
+          <button id="buy-credits-btn" class="footer-btn">Refill</button>
+          <span class="footer-separator"></span>
+          <button id="logout-btn" class="footer-btn footer-logout">Logout</button>
+        </div>
+      </footer>
+
+    </div>
+
+  </div>
+
+
+
+
+
+</body>
+</html>

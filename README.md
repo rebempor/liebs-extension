@@ -42,7 +42,7 @@
 | :---: | :---: | :---: |
 | <img src="docs/assets/liebs-demo-profile.png" alt="Original portrait in the supplied conversation demo." width="300" /> | <img src="docs/assets/liebs-demo-transform.png" alt="Portrait transition with the personalized greeting Hey, Jensen!" width="300" /> | <img src="docs/assets/liebs-demo-greeting.png" alt="Stylized character waving with the call to action Open to talk?" width="300" /> |
 
-These screenshots are unaltered frames from the supplied demo, not captures of a newly verified live session. The companion extension still uses its earlier **Pixar GIF Generator** name; **Liebs** is the product name used here.
+These screenshots are unaltered frames from the supplied demo, not captures of a newly verified live session. The newer companion package is branded **Liebs GIF Generator**; older Desktop prototypes retain the Pixar GIF Generator name.
 
 ## The idea
 
@@ -58,12 +58,12 @@ The product combines a browser workflow with server-side AI generation, renderin
 
 | Step | What the user does | What the product does |
 | :--- | :--- | :--- |
-| **01 · Choose a person** | Open a LinkedIn profile and click the extension's **Pixar GIF** button. | Read the profile name and photo. |
+| **01 · Choose a person** | Open a LinkedIn profile and use the **Liebs** extension controls. | Read the profile name and photo. |
 | **02 · Make it personal** | Set a greeting and call to action in the extension. | Carry that copy into the generated greeting. |
 | **03 · Bring it to life** | Start a generation using a credit. | Transform the portrait, animate a wave, and compose the finished media. |
 | **04 · Start a conversation** | Review the result and use it in a message. | The companion extension attempts to attach the GIF to the composer, with a preview/download fallback. |
 
-The companion extension's intended workflow leaves sending the message to the user. Its local implementation needs the API update described under [Project status](#project-status).
+The companion extension's intended workflow leaves sending the message to the user. The newer local package already supports background job polling; compatibility with this backend checkout still needs validation, as described under [Project status](#project-status).
 
 ## What's in the backend
 
@@ -260,17 +260,19 @@ The local project inventory found these related folders, outside this repository
 
 | Folder | Role |
 | :--- | :--- |
-| `linkedin-pixar-saas/extension/` | Manifest V3 Chrome extension: profile capture, auth/credits popup, greeting settings, and composer integration. |
+| `Downloads/liebs-extension/` | Newest local extension package found: 20 files, with source file timestamps of April 18, 2026. Liebs branding, background job polling/recovery, composer integration, authentication callback, and analytics/error reporting. Calls `api.liebs.app`. |
+| `Downloads/liebs-orbita-new/` | Closely related April 16, 2026 package. Four files differ from the April 18 package, including profile-photo detection and interface changes. |
+| `Desktop/Claude/linkedin-pixar-saas/extension/` | Older February 2026 SaaS prototype with seven files; expects the earlier synchronous generation response. |
 | `linkedin-pixar-saas/remotion/` | Render source with the `Main` and `ParticlesOnly` compositions. |
 | `linkedin-pixar-saas/backend/` | An older local backend checkout; GitHub contains newer pipeline and job-queue work. |
 | `linkedin-pixar-extension/` | Earlier standalone extension with direct AI integrations and a native-host renderer. |
 
-These names document the companion source layout; they are not paths available in a fresh clone. The banner above illustrates the product concept, not a captured application screen.
+These paths are relative to the owner’s home folder and document the companion source layout; they are not paths available in a fresh clone. Both recent extension packages still declare version `2.0.0`, so the version number alone does not establish which is newer. All local files referenced by the April 18 package’s manifest, HTML, and literal `importScripts` calls were present during inspection. This verifies package completeness, not a live generation flow. The banner above illustrates the product concept, not a captured application screen.
 
 ### Next integration milestones
 
 - [ ] Version and link the companion extension and render source so the full product can be reproduced.
-- [ ] Update the local SaaS extension to handle `202` responses and poll job status; it currently expects a finished `gifUrl` in the initial response.
+- [ ] Locate and version the backend matching the newer Liebs extension. That package already polls jobs and calls batch status (`/api/generate/jobs/status`) and pre-processing (`/api/generate/pre-process`) endpoints that are absent from this checkout. Confirm the source of the deployed `api.liebs.app` service before treating this repository as the complete current backend.
 - [ ] Finish cancellation and live progress wiring. The cancel route references a worker function that is not exported; the worker does not forward the pipeline's progress callback.
 - [ ] Complete payment validation. The global JSON body parser runs before the Stripe webhook's raw-body parser; signature verification needs the original request bytes. Also add duplicate-event protection to credit fulfillment.
 - [ ] Make storage configuration portable and verify a fresh deployment end to end.

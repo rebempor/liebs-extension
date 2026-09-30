@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Liebs · Personalized animated greetings, created from a LinkedIn profile.</strong><br />
-  The backend for a Chrome extension that turns a profile photo into a stylized 3D character,<br />
+  A Chrome extension and backend that turn a profile photo into a stylized 3D character,<br />
   brings it to life, and adds a greeting made for that person.
 </p>
 
@@ -20,7 +20,8 @@
   <a href="#the-idea">The idea</a> ·
   <a href="#the-experience">The experience</a> ·
   <a href="#how-it-works">How it works</a> ·
-  <a href="#getting-started">Getting started</a> ·
+  <a href="#install-the-extension">Install extension</a> ·
+  <a href="#getting-started">Backend setup</a> ·
   <a href="#project-status">Project status</a>
 </p>
 
@@ -52,7 +53,7 @@ A name in a message is a start. A tiny animated version of the person waving hel
 
 > **Example:** a profile photo becomes a waving 3D character, introduced with “Hey, Alex!” and followed by “Open to talk?”
 
-The product combines a browser workflow with server-side AI generation, rendering, accounts, and credits. The repository retains its original `linkedin-pixar-backend` name. This repository contains the **backend**; the extension and Remotion composition are separate companion projects.
+The product combines a browser workflow with server-side AI generation, rendering, accounts, and credits. The repository retains its original `linkedin-pixar-backend` name. This repository contains the **backend** and the latest local **[Chrome extension package](extension/)**. The Remotion composition remains a separate companion project.
 
 ## The experience
 
@@ -149,9 +150,15 @@ The code also declares a cancellation route, but its worker implementation is in
 
 </details>
 
+## Install the extension
+
+The complete April 18, 2026 Liebs extension package is included in [`extension/`](extension/), with no build step required. Download or clone this repository, then follow the [Chrome installation instructions](extension/README.md#install-in-chrome).
+
+The extension connects to `api.liebs.app` and `liebs.app`. The root backend does not yet implement all of its authentication and generation endpoints; see [service dependencies](extension/README.md#service-dependencies).
+
 ## Getting started
 
-This is a backend service with external dependencies. A fresh clone does not include the Chrome extension or the render composition.
+The following setup is for the backend service and its external dependencies. The extension is included in this repository; the Remotion composition is still separate.
 
 ### 1. Prepare the services
 
@@ -229,6 +236,7 @@ A successful health response confirms the HTTP server is running. Validate datab
 ## Repository map
 
 ```text
+extension/                    Complete Liebs Chrome extension package
 src/
 ├── index.js                  Express app and worker startup
 ├── config/env.js             Supabase configuration and aliases
@@ -254,25 +262,26 @@ supabase-schema.sql           Base schema and credit functions
 
 **An implemented backend prototype, with integration work still to finish.** The repository includes the AI/media pipeline and SaaS foundations; the complete extension-to-backend experience is not yet reproducible from this repository alone.
 
-### Companion projects
+### Extension source and companion projects
 
-The local project inventory found these related folders, outside this repository:
+The newest local extension package is now versioned in [`extension/`](extension/). Its 20 original source files were copied without changes, excluding macOS metadata. The inventory below records its origin and the other copies found on the owner’s laptop:
 
 | Folder | Role |
 | :--- | :--- |
-| `Downloads/liebs-extension/` | Newest local extension package found: 20 files, with source file timestamps of April 18, 2026. Liebs branding, background job polling/recovery, composer integration, authentication callback, and analytics/error reporting. Calls `api.liebs.app`. |
+| `Downloads/liebs-extension/` → [`extension/`](extension/) | Imported package: 20 files, with source file timestamps of April 18, 2026. Liebs branding, background job polling/recovery, composer integration, authentication callback, and analytics/error reporting. Calls `api.liebs.app`. |
 | `Downloads/liebs-orbita-new/` | Closely related April 16, 2026 package. Four files differ from the April 18 package, including profile-photo detection and interface changes. |
 | `Desktop/Claude/linkedin-pixar-saas/extension/` | Older February 2026 SaaS prototype with seven files; expects the earlier synchronous generation response. |
 | `linkedin-pixar-saas/remotion/` | Render source with the `Main` and `ParticlesOnly` compositions. |
 | `linkedin-pixar-saas/backend/` | An older local backend checkout; GitHub contains newer pipeline and job-queue work. |
 | `linkedin-pixar-extension/` | Earlier standalone extension with direct AI integrations and a native-host renderer. |
 
-These paths are relative to the owner’s home folder and document the companion source layout; they are not paths available in a fresh clone. Both recent extension packages still declare version `2.0.0`, so the version number alone does not establish which is newer. All local files referenced by the April 18 package’s manifest, HTML, and literal `importScripts` calls were present during inspection. This verifies package completeness, not a live generation flow. The banner above illustrates the product concept, not a captured application screen.
+The source paths above refer to the owner’s local inventory; only the imported `extension/` folder is available in a fresh clone. Both recent extension packages still declare version `2.0.0`, so the version number alone does not establish which is newer. All local files referenced by the April 18 package’s manifest, HTML, and literal `importScripts` calls were present during inspection. This verifies package completeness, not a live generation flow. The banner above illustrates the product concept, not a captured application screen.
 
 ### Next integration milestones
 
-- [ ] Version and link the companion extension and render source so the full product can be reproduced.
-- [ ] Locate and version the backend matching the newer Liebs extension. That package already polls jobs and calls batch status (`/api/generate/jobs/status`) and pre-processing (`/api/generate/pre-process`) endpoints that are absent from this checkout. Confirm the source of the deployed `api.liebs.app` service before treating this repository as the complete current backend.
+- [x] Version the latest local Chrome extension package with installation instructions.
+- [ ] Version and link the companion Remotion render source so the full product can be reproduced.
+- [ ] Locate and version the backend matching the newer Liebs extension. That package already polls jobs and calls browser authentication (`/api/auth/extension/exchange`), batch status (`/api/generate/jobs/status`), and pre-processing (`/api/generate/pre-process`) endpoints that are absent from this checkout. Confirm the source of the deployed `api.liebs.app` service before treating this repository as the complete current backend.
 - [ ] Finish cancellation and live progress wiring. The cancel route references a worker function that is not exported; the worker does not forward the pipeline's progress callback.
 - [ ] Complete payment validation. The global JSON body parser runs before the Stripe webhook's raw-body parser; signature verification needs the original request bytes. Also add duplicate-event protection to credit fulfillment.
 - [ ] Make storage configuration portable and verify a fresh deployment end to end.

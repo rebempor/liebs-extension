@@ -1,0 +1,71 @@
+{
+  "manifest_version": 3,
+  "name": "Liebs GIF Generator",
+  "version": "2.0.0",
+  "description": "Transform LinkedIn profile photos into animated GIFs",
+
+  "permissions": [
+    "activeTab",
+    "storage",
+    "alarms",
+    "clipboardWrite",
+    "clipboardRead"
+  ],
+
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://media.licdn.com/*",
+    "https://api.liebs.app/*",
+    "https://assets.liebs.app/*",
+    "https://*.amazonaws.com/*",
+    "https://*.ingest.de.sentry.io/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "exclude_matches": [
+        "https://www.linkedin.com/sales",
+        "https://www.linkedin.com/sales/*"
+      ],
+      "js": [
+        "vendor/sentry.min.js",
+        "sentry-init.js",
+        "shared-core.js",
+        "content-shared.js",
+        "content-timing.js",
+        "profile.js",
+        "composer.js",
+        "content-profile-photo.js",
+        "content-trigger-placement.js",
+        "content.js"
+      ],
+      "css": ["content.css"]
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup/popup.html"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "auth-callback.html",
+        "auth-callback.js",
+        "shared-core.js",
+        "sentry-init.js",
+        "vendor/sentry.min.js"
+      ],
+      "matches": [
+        "https://liebs.app/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ]
+    }
+  ]
+}

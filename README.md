@@ -37,6 +37,16 @@
 
 <p align="center"><em>A conversation demo supplied by the project owner. The original GIF shows the full transformation and message presentation.</em></p>
 
+### Example video · Alex cartoon pitch
+
+<p align="center">
+  <a href="docs/assets/liebs-alex-cartoon-pitch.mp4">
+    <img src="docs/assets/liebs-alex-video-poster.png" alt="Preview frame from the Liebs Alex cartoon pitch example video. Select to open the MP4." width="420" />
+  </a>
+</p>
+
+<p align="center"><a href="docs/assets/liebs-alex-cartoon-pitch.mp4"><strong>Watch the Alex cartoon pitch →</strong></a><br /><em>35-second example with audio · Original 1080 × 1080 MP4 supplied by the project owner.</em></p>
+
 ### From profile photo to animated greeting
 
 | 01 · The profile photo | 02 · The transformation | 03 · The personal greeting |

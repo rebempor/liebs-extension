@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+  <title id="title">LinkedIn Pixar GIF — A little character. A better hello.</title>
+  <desc id="desc">A dark violet banner illustrating the concept: profile photo, AI character, personal greeting.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#121629"/><stop offset="1" stop-color="#292043"/></linearGradient>
+    <linearGradient id="accent" x2="1" y2="1"><stop stop-color="#baa7ff"/><stop offset="1" stop-color="#f6adc9"/></linearGradient>
+  </defs>
+  <rect width="1200" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="1140" cy="15" r="230" fill="#a88aff" opacity=".055"/>
+  <circle cx="1035" cy="430" r="220" fill="#f6adc9" opacity=".04"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <rect x="48" y="42" width="246" height="28" rx="14" fill="#ffffff" fill-opacity=".08"/>
+    <circle cx="65" cy="56" r="4" fill="#bcebd2"/>
+    <text x="78" y="60" fill="#e4dff7" font-size="11" letter-spacing="1.5">CHROME EXTENSION + SAAS</text>
+    <text x="48" y="140" fill="#ffffff" font-size="51" font-weight="700" letter-spacing="-2">A little character.</text>
+    <text x="48" y="200" fill="#d2beff" font-size="51" font-weight="700" letter-spacing="-2">A better hello.</text>
+    <text x="50" y="245" fill="#bbb9ce" font-size="17">Turn a profile photo into a personal, animated greeting.</text>
+    <text x="50" y="342" fill="#ffffff" font-size="16" font-weight="700">LinkedIn Pixar GIF</text>
+    <text x="50" y="365" fill="#a5a2ba" font-size="12" letter-spacing="1">BACKEND API / PRODUCT PROTOTYPE</text>
+    <g transform="translate(675 114)">
+      <rect width="128" height="168" rx="16" fill="#ffffff" fill-opacity=".05" stroke="#ffffff" stroke-opacity=".14"/>
+      <rect x="14" y="14" width="100" height="104" rx="10" fill="#323448"/>
+      <circle cx="64" cy="52" r="19" fill="#7d819b"/>
+      <path d="M29 107c0-28 16-35 35-35s35 7 35 35" fill="#7d819b"/>
+      <text x="64" y="145" text-anchor="middle" fill="#c4c2d3" font-size="12">01 / Profile</text>
+    </g>
+    <path d="M814 194h16m-6-6 6 6-6 6" fill="none" stroke="#9d8cbb" stroke-width="2" stroke-linecap="round"/>
+    <g transform="translate(841 100)">
+      <rect width="128" height="182" rx="16" fill="#ffffff" fill-opacity=".08" stroke="#c2a8ff" stroke-opacity=".6"/>
+      <rect x="14" y="14" width="100" height="118" rx="10" fill="url(#accent)"/>
+      <path d="M30 123c0-26 15-35 34-35s34 9 34 35" fill="#675192"/>
+      <ellipse cx="64" cy="63" rx="26" ry="31" fill="#fff0e8"/>
+      <path d="M39 58c-8-38 52-42 51 0-10-3-15-16-16-18-5 12-21 16-35 18" fill="#493851"/>
+      <ellipse cx="54" cy="62" rx="4" ry="5" fill="#473951"/>
+      <ellipse cx="75" cy="62" rx="4" ry="5" fill="#473951"/>
+      <path d="M56 78q8 8 16-1" fill="none" stroke="#bc788b" stroke-width="3" stroke-linecap="round"/>
+      <path d="m108 5 3 8 8 3-8 3-3 8-3-8-8-3 8-3z" fill="#e7d8ff"/>
+      <text x="64" y="159" text-anchor="middle" fill="#e8ddff" font-size="12">02 / Character</text>
+    </g>
+    <path d="M980 194h16m-6-6 6 6-6 6" fill="none" stroke="#9d8cbb" stroke-width="2" stroke-linecap="round"/>
+    <g transform="translate(1007 114)">
+      <rect width="145" height="168" rx="16" fill="#ffffff" fill-opacity=".05" stroke="#ffffff" stroke-opacity=".14"/>
+      <path d="M20 35h105v64H65l-19 15V99H20z" fill="#bcebd2"/>
+      <text x="72" y="63" text-anchor="middle" fill="#244535" font-size="14" font-weight="700">Hey, Alex!</text>
+      <text x="72" y="82" text-anchor="middle" fill="#426753" font-size="10">Open to talk?</text>
+      <text x="72" y="145" text-anchor="middle" fill="#c4c2d3" font-size="12">03 / Say hello</text>
+    </g>
+    <text x="913" y="316" text-anchor="middle" fill="#8e88a6" font-size="11" letter-spacing="1.5">THE IDEA, ILLUSTRATED</text>
+  </g>
+</svg>

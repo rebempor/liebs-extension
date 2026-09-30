@@ -61,6 +61,12 @@ Unaltered frames from the example GIF above.
 
 ## The extension
 
+<p align="center">
+  <img src="docs/assets/liebs-ui-overview.png" alt="Liebs UI previews: connect your account on the left; GIF/video controls, personalized greetings, history, and credits on the right." width="100%" />
+</p>
+
+*Rendered UI previews reconstructed from the current extension design, with sample account, balance, and history data.* [Connection screen](docs/assets/liebs-ui-connect.png) · [Main popup](docs/assets/liebs-ui-create.png)
+
 The included **Liebs GIF Generator** extension brings the controls into the browser:
 
 | Control | What it does |
@@ -71,7 +77,7 @@ The included **Liebs GIF Generator** extension brings the controls into the brow
 | **Charms** | See the available credit balance and refill controls. |
 | **Outreach Mode** | Request profile pre-processing while you browse. |
 
-**[Explore the interface preview →](docs/ui-preview/README.md)** A self-contained preview of the actual extension HTML/CSS is included at `docs/ui-preview/index.html`. Open it locally after downloading the repository. It shows the account connection and main popup with sample data; it is not a live account session.
+The [preview source](docs/ui-preview/README.md) includes editable SVGs and a separate HTML/CSS version for local viewing.
 
 ## Try it
 

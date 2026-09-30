@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="docs/assets/readme-banner.svg" alt="LinkedIn Pixar GIF — A little character. A better hello. Profile photo → AI character → personal greeting." width="100%" />
+  <img src="docs/assets/readme-banner.svg" alt="Liebs — A little character. A better hello. Profile photo → AI character → personal greeting." width="100%" />
 </p>
 
 <p align="center">
-  <strong>Personalized animated greetings, created from a LinkedIn profile.</strong><br />
+  <strong>Liebs · Personalized animated greetings, created from a LinkedIn profile.</strong><br />
   The backend for a Chrome extension that turns a profile photo into a stylized 3D character,<br />
   brings it to life, and adds a greeting made for that person.
 </p>
@@ -16,6 +16,7 @@
 </p>
 
 <p align="center">
+  <a href="#see-liebs">See Liebs</a> ·
   <a href="#the-idea">The idea</a> ·
   <a href="#the-experience">The experience</a> ·
   <a href="#how-it-works">How it works</a> ·
@@ -25,15 +26,33 @@
 
 ---
 
+## See Liebs
+
+### A personal hello, in motion
+
+<p align="center">
+  <img src="docs/assets/liebs-example.gif" alt="Liebs conversation demo: Jensen Huang's portrait transforms into a waving 3D character with the greeting Hey, Jensen! and the call to action Open to talk?" width="497" />
+</p>
+
+<p align="center"><em>A conversation demo supplied by the project owner. The original GIF shows the full transformation and message presentation.</em></p>
+
+### From profile photo to animated greeting
+
+| 01 · The profile photo | 02 · The transformation | 03 · The personal greeting |
+| :---: | :---: | :---: |
+| <img src="docs/assets/liebs-demo-profile.png" alt="Original portrait in the supplied conversation demo." width="300" /> | <img src="docs/assets/liebs-demo-transform.png" alt="Portrait transition with the personalized greeting Hey, Jensen!" width="300" /> | <img src="docs/assets/liebs-demo-greeting.png" alt="Stylized character waving with the call to action Open to talk?" width="300" /> |
+
+These screenshots are unaltered frames from the supplied demo, not captures of a newly verified live session. The companion extension still uses its earlier **Pixar GIF Generator** name; **Liebs** is the product name used here.
+
 ## The idea
 
 A name in a message is a start. A tiny animated version of the person waving hello makes the greeting feel personal before they read a word.
 
-**LinkedIn Pixar GIF** is a credit-based SaaS concept for people who want to open a conversation with a memorable visual. From a LinkedIn profile, the companion Chrome extension captures the person's name and photo. The backend creates a stylized character, animates a wave, and produces a GIF with a custom greeting and call to action.
+**Liebs** is a credit-based SaaS concept for people who want to open a conversation with a memorable visual. From a LinkedIn profile, the companion Chrome extension captures the person's name and photo. The backend creates a stylized character, animates a wave, and produces a GIF with a custom greeting and call to action.
 
 > **Example:** a profile photo becomes a waving 3D character, introduced with “Hey, Alex!” and followed by “Open to talk?”
 
-The product combines a browser workflow with server-side AI generation, rendering, accounts, and credits. This repository contains the **backend**; the extension and Remotion composition are separate companion projects.
+The product combines a browser workflow with server-side AI generation, rendering, accounts, and credits. The repository retains its original `linkedin-pixar-backend` name. This repository contains the **backend**; the extension and Remotion composition are separate companion projects.
 
 ## The experience
 

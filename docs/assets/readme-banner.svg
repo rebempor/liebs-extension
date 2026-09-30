@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
-  <title id="title">LinkedIn Pixar GIF — A little character. A better hello.</title>
+  <title id="title">Liebs — A little character. A better hello.</title>
   <desc id="desc">A dark violet banner illustrating the concept: profile photo, AI character, personal greeting.</desc>
   <defs>
     <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#121629"/><stop offset="1" stop-color="#292043"/></linearGradient>
@@ -15,7 +15,7 @@
     <text x="48" y="140" fill="#ffffff" font-size="51" font-weight="700" letter-spacing="-2">A little character.</text>
     <text x="48" y="200" fill="#d2beff" font-size="51" font-weight="700" letter-spacing="-2">A better hello.</text>
     <text x="50" y="245" fill="#bbb9ce" font-size="17">Turn a profile photo into a personal, animated greeting.</text>
-    <text x="50" y="342" fill="#ffffff" font-size="16" font-weight="700">LinkedIn Pixar GIF</text>
+    <text x="50" y="342" fill="#ffffff" font-size="16" font-weight="700">Liebs</text>
     <text x="50" y="365" fill="#a5a2ba" font-size="12" letter-spacing="1">BACKEND API / PRODUCT PROTOTYPE</text>
     <g transform="translate(675 114)">
       <rect width="128" height="168" rx="16" fill="#ffffff" fill-opacity=".05" stroke="#ffffff" stroke-opacity=".14"/>
